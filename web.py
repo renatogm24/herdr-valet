@@ -15,6 +15,7 @@ from __future__ import annotations
 
 
 import json
+from datetime import datetime
 import os
 import pwd
 import re
@@ -44,8 +45,15 @@ def state() -> dict:
         live, herdr_error = [], str(e)
     history = []
     if valet.HISTORY.is_dir():
-        files = sorted(valet.HISTORY.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        history = [{**json.loads(p.read_text()), "resumed_at": p.stat().st_mtime} for p in files[:15]]
+        # resumed_at comes from the card; cards moved before it was recorded fall back to the
+        # file's mtime, which is the park time (a rename keeps it).
+        rows = []
+        for p in valet.HISTORY.glob("*.json"):
+            c = json.loads(p.read_text())
+            at = c.get("resumed_at")
+            c["resumed_at"] = datetime.fromisoformat(at).timestamp() if at else p.stat().st_mtime
+            rows.append(c)
+        history = sorted(rows, key=lambda c: c["resumed_at"], reverse=True)[:15]
     return {
         "user": USER,
         "idle_days": valet.CONF["idle_days"],
