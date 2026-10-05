@@ -51,6 +51,11 @@ DEFAULTS = {
     # carpeta de la ficha, dentro de un panel nuevo de herdr.
     "resume_command": "claude --resume {session_id}",
     "summary_model": "haiku",
+    # Con qué se llama a Claude para el resumen. {session_id} se reemplaza; herdr-valet le suma
+    # `-p --model ...` y le pasa el extracto por stdin. Un wrapper propio sirve para mandar los
+    # resúmenes por la misma cuenta o proxy que usó la sesión: tiene que terminar en
+    # `exec claude "$@"`.
+    "summary_command": "claude",
     "data_dir": str(Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "herdr-valet"),
     # Un puerto por usuario, para que dos personas en la misma máquina no choquen.
     "port": 8790 + max(0, os.getuid() - 1000),
@@ -159,7 +164,8 @@ def herdr_running() -> bool:
 def boot_id() -> str:
     """Cambia con cada arranque de la máquina."""
     if sys.platform == "darwin":
-        out = subprocess.run(["sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
+        # Ruta absoluta: el PATH de launchd no incluye /usr/sbin.
+        out = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
         return out.stdout.strip()
     return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 
@@ -255,10 +261,12 @@ def summarize(p: Path) -> str:
     first, tail = excerpt(p)
     if not tail:
         return "Sesión sin conversación."
+    # El transcript se llama <session_id>.jsonl.
+    cmd = [a.replace("{session_id}", p.stem) for a in shlex.split(CONF["summary_command"])]
     try:
         out = subprocess.run(
             [
-                "claude", "-p", "--model", CONF["summary_model"], "--no-session-persistence",
+                *cmd, "-p", "--model", CONF["summary_model"], "--no-session-persistence",
                 "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SUMMARY_PROMPT,
             ],
             input=f"Primer pedido: {first}\n\n<transcript>\n{tail}\n</transcript>",
@@ -400,6 +408,10 @@ def auto(days: float, dry_run: bool) -> list[dict]:
     """Aparca las sesiones quietas hace más de `days` días. Nunca una que esté trabajando,
     esperando una respuesta o enfocada en la pantalla."""
     done = []
+    # Sin herdr no hay nada que aparcar: el timer corre igual cada 10 min y no tiene que dejar un
+    # error en el log cada vez.
+    if not herdr_running():
+        return done
     if not dry_run:
         snapshot()
     for s in live_sessions():

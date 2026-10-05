@@ -14,6 +14,11 @@
 # Modelo que escribe el resumen de cada ficha (claude -p --model ...).
 # summary_model = "haiku"
 
+# Con qué se llama a Claude para el resumen. {session_id} se reemplaza; se le suman los flags
+# `-p --model ...`. Un wrapper sirve para mandar el resumen por la misma cuenta o proxy que usó la
+# sesión (tiene que terminar en `exec claude "$@"`).
+# summary_command = "claude"
+
 # Puerto de la página (127.0.0.1). Por defecto 8790 + (uid - 1000): uno por usuario.
 # port = 8790
 
