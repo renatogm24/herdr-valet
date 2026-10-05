@@ -3,100 +3,222 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Parked sessions</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0e18'/%3E%3Crect x='10' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3Crect x='18' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3C/svg%3E">
+<meta name="color-scheme" content="light dark">
+<title>herdr-valet</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2316181d'/%3E%3Cpath d='M9 6v20M23 6v8a6 6 0 0 1-6 6H9' stroke='%23e4572e' stroke-width='3.5' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='9' cy='20' r='3.4' fill='%23f4f1ea'/%3E%3C/svg%3E">
 <style>
-  /* Dark palette; no external dependencies: the page is self-contained. */
+  /* World: enamel station signage + the schematic line map. Each project is a line with its own
+     color; each parked session is a stop on it. One system sans, tabular numerals, an 8px grid.
+     No external requests: the page runs on 127.0.0.1, sometimes offline. */
   :root {
-    --bg: #0b0e18; --panel: #121726; --raised: #182035; --line: #1f2940;
-    --fg: #e2e8f0; --body: #b6c2d4; --muted: #64748b;
-    --accent: #64b3f4; --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
-    color-scheme: dark;
+    --u: 8px;
+    --ground: #f2efe8; --panel: #fffdf8; --raised: #ebe7de; --rule: #d8d2c6; --rule-strong: #b9b2a4;
+    --ink: #16181d; --body: #3a3d44; --muted: #63666e; --faint: #8d9098;
+    --accent: #1d3fb8; --accent-ink: #ffffff; --accent-soft: #e3e8fa;
+    --ok: #1f7a55; --warn: #8a5100; --warn-soft: #fbefd9; --bad: #b42318; --bad-soft: #fbe4e1;
+    --focus: #1d3fb8;
+    --shadow: 0 1px 2px rgb(22 24 29 / 0.06), 0 4px 16px rgb(22 24 29 / 0.06);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #111317; --panel: #181b20; --raised: #20242a; --rule: #2b3038; --rule-strong: #3d434d;
+      --ink: #ece8df; --body: #c9c5bc; --muted: #959aa2; --faint: #6c7079;
+      --accent: #8aa6ff; --accent-ink: #0d1430; --accent-soft: #1d2647;
+      --ok: #5cc795; --warn: #f0b45a; --warn-soft: #2e2413; --bad: #ff8a7a; --bad-soft: #35191a;
+      --focus: #8aa6ff;
+      --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 6px 20px rgb(0 0 0 / 0.25);
+      color-scheme: dark;
+    }
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); }
-  .wrap { max-width: 980px; margin: 0 auto; padding: 2rem 1.25rem 4rem; display: flex; flex-direction: column; gap: 2rem; }
-  header { display: flex; flex-direction: column; gap: 0.4rem; }
-  header .h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
-  header h1 { font-size: 1.35rem; letter-spacing: -0.01em; }
-  header .who { font: 600 0.72rem ui-monospace, monospace; color: var(--accent); border: 1px solid #23406a; padding: 2px 8px; border-radius: 999px; }
-  header p { color: var(--muted); font-size: 0.88rem; max-width: 66ch; }
-  h2 { display: flex; align-items: center; gap: 0.6rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.14em; color: #64748b; margin-bottom: 0.9rem; }
-  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  h2 .n { color: var(--accent); }
-  .list { display: flex; flex-direction: column; gap: 0.75rem; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
-  .card-top { display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
-  .card-top .t { flex: 1 1 18rem; min-width: 0; }
-  .card h3 { font-size: 1rem; line-height: 1.35; text-wrap: balance; }
-  .meta { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
-  .chip { font: 500 0.7rem ui-monospace, monospace; color: var(--body); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
-  .chip.age { color: var(--warn); border-color: #4a3a12; }
-  .chip.idle { color: var(--muted); }
-  .chip.working { color: var(--ok); border-color: #14532d; }
-  .summary { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.8rem; font-size: 0.88rem; color: var(--body); }
-  .summary dt { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 0.15rem; }
-  .summary dd { min-width: 0; overflow-wrap: anywhere; }
-  .path { font: 0.75rem ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
-  .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
-  button { font: inherit; font-size: 0.85rem; border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; border: 1px solid var(--line); background: var(--raised); color: var(--fg); }
-  button:hover { border-color: #334155; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #07111f; font-weight: 600; }
-  button.danger { color: var(--bad); }
-  button:disabled { opacity: 0.5; cursor: progress; }
-  .note { font-size: 0.82rem; color: var(--muted); }
+  html { background: var(--ground); }
+  body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    color: var(--ink); background: var(--ground); font-variant-numeric: tabular-nums; min-height: 100vh; }
+  ::selection { background: var(--accent); color: var(--accent-ink); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+  * { scrollbar-color: var(--rule-strong) transparent; scrollbar-width: thin; }
+  code, .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 0.82em; }
+
+  /* ------------------------------------------------------------------ top bar */
+  .bar { position: sticky; top: 0; z-index: 5; background: var(--ink); color: var(--ground); }
+  .bar-in { max-width: 1240px; margin: 0 auto; padding: calc(var(--u) * 1.5) calc(var(--u) * 3);
+    display: flex; align-items: center; gap: calc(var(--u) * 2); }
+  .mark { display: flex; align-items: center; gap: var(--u); font-weight: 700; letter-spacing: -0.01em; font-size: 1.05rem; white-space: nowrap; }
+  .mark svg { flex: none; }
+  .who { font-size: 0.78rem; font-weight: 600; opacity: 0.6; }
+  .search { flex: 1; max-width: 420px; margin-left: auto; position: relative; }
+  .search input { width: 100%; font: inherit; font-size: 0.9rem; color: inherit; background: rgb(255 255 255 / 0.08);
+    border: 1px solid rgb(255 255 255 / 0.18); border-radius: 6px; padding: 6px 30px 6px 34px; }
+  .search input::placeholder { color: inherit; opacity: 0.6; }
+  .search input:focus { outline: none; border-color: currentColor; background: rgb(255 255 255 / 0.12); }
+  .search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); opacity: 0.7; }
+  .search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: 600 0.7rem ui-monospace, monospace;
+    border: 1px solid rgb(255 255 255 / 0.3); border-radius: 4px; padding: 0 5px; opacity: 0.7; }
+  .counts { display: flex; gap: calc(var(--u) * 2); font-size: 0.82rem; white-space: nowrap; }
+  .counts b { font-weight: 700; }
+  .counts span { opacity: 0.75; }
+  .herdr { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; opacity: 0.85; white-space: nowrap; }
+  .herdr i { width: 8px; height: 8px; border-radius: 50%; background: #5cc795; }
+  .herdr.down i { background: #ff8a7a; }
+  @media (prefers-color-scheme: dark) { .bar { background: #07080a; color: var(--ink); } }
+
+  /* ------------------------------------------------------------------ page */
+  .page { max-width: 1240px; margin: 0 auto; padding: calc(var(--u) * 3); display: flex; flex-direction: column; gap: calc(var(--u) * 3); }
+  .banner { background: var(--warn-soft); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+    border-radius: 8px; padding: calc(var(--u) * 1.5) calc(var(--u) * 2); font-size: 0.9rem; }
+  .sect { display: flex; align-items: baseline; gap: var(--u); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: calc(var(--u) * 1.5); }
+  .sect .n { color: var(--ink); }
+
+  /* platform: open now */
+  .platform { display: flex; flex-wrap: wrap; gap: var(--u); }
+  .open { display: flex; align-items: center; gap: calc(var(--u) * 1.25); background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 6px 6px 6px 12px; min-height: 42px; min-width: 0; max-width: 100%; }
+  .open .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
+  .open .nm { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22ch; }
+  .open .fd { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20ch; }
+  .open .st { font-size: 0.78rem; color: var(--muted); white-space: nowrap; padding-right: 6px; }
+  .open .st.working { color: var(--ok); font-weight: 600; }
+  .open .note { font-size: 0.78rem; }
+  .open .note:empty { display: none; }
+  .empty-line { font-size: 0.88rem; color: var(--muted); }
+
+  /* ------------------------------------------------------------------ map + detail */
+  .board { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: calc(var(--u) * 3); align-items: start; }
+  .map { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: var(--u) 0; }
+  .line { padding: var(--u) 0; }
+  .line + .line { border-top: 1px solid var(--rule); }
+  .line-h { display: flex; align-items: center; gap: var(--u); padding: 4px calc(var(--u) * 2); font-size: 0.8rem; font-weight: 700; }
+  .line-h .bullet { width: 18px; height: 18px; border-radius: 50%; background: var(--line); display: grid; place-items: center; flex: none; }
+  .line-h .bullet::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--panel); }
+  .line-h .ct { margin-left: auto; color: var(--muted); font-weight: 600; }
+  .stops { list-style: none; position: relative; }
+  /* the line itself: one stroke through every stop of the project */
+  .stops::before { content: ""; position: absolute; left: calc(var(--u) * 2 + 7px); top: 0; bottom: 16px; width: 4px; background: var(--line); border-radius: 2px; }
+  .stop { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: var(--u); width: 100%; text-align: left;
+    font: inherit; color: inherit; background: none; border: 0; padding: 7px calc(var(--u) * 2); cursor: pointer; position: relative; }
+  .stop:hover { background: var(--raised); }
+  .stop .node { width: 12px; height: 12px; border-radius: 50%; background: var(--panel); border: 3px solid var(--line); justify-self: center; position: relative; z-index: 1; transition: transform 160ms cubic-bezier(.2,.8,.2,1); }
+  .stop .t { font-size: 0.88rem; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .stop .a { font-size: 0.75rem; color: var(--muted); white-space: nowrap; }
+  .stop.reboot .a { color: var(--warn); }
+  .stop[aria-current="true"] { background: var(--accent-soft); }
+  .stop[aria-current="true"] .node { background: var(--line); transform: scale(1.35); }
+  .stop[aria-current="true"] .t { font-weight: 650; }
+  .terminus { --line: var(--rule-strong); }
+  .terminus .stop { cursor: default; }
+  .terminus .stop:hover { background: none; }
+  .terminus .t { color: var(--muted); }
+  .map-empty { padding: var(--u) calc(var(--u) * 2); color: var(--muted); font-size: 0.88rem; }
+
+  .detail { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; box-shadow: var(--shadow);
+    padding: calc(var(--u) * 3); display: flex; flex-direction: column; gap: calc(var(--u) * 2.5); position: sticky; top: 76px; min-width: 0; }
+  .sign { display: inline-flex; align-items: center; gap: var(--u); align-self: flex-start; font-size: 0.8rem; font-weight: 700;
+    border: 2px solid var(--line); border-radius: 999px; padding: 2px 12px 2px 4px; }
+  .sign .bullet { width: 16px; height: 16px; border-radius: 50%; background: var(--line); }
+  .sign .sub { font-weight: 500; color: var(--muted); }
+  .detail h1 { font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.015em; text-wrap: balance; }
+  .facts { display: flex; flex-wrap: wrap; gap: 4px calc(var(--u) * 2); font-size: 0.82rem; color: var(--muted); }
+  .facts b { color: var(--body); font-weight: 600; }
+  .facts .reboot { color: var(--warn); font-weight: 600; }
+  .summary { display: grid; grid-template-columns: 150px 1fr; gap: calc(var(--u) * 1.5) calc(var(--u) * 2.5); border-top: 1px solid var(--rule); padding-top: calc(var(--u) * 2.5); }
+  .summary dt { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
+  .summary dd { color: var(--body); max-width: 68ch; overflow-wrap: anywhere; }
+  .summary dd.next { color: var(--ink); font-weight: 600; }
+  .path { color: var(--muted); overflow-wrap: anywhere; }
+  .actions { display: flex; align-items: center; gap: var(--u); flex-wrap: wrap; border-top: 1px solid var(--rule); padding-top: calc(var(--u) * 2.5); }
+  button.btn { font: inherit; font-size: 0.88rem; font-weight: 600; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+    border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); transition: background 150ms, border-color 150ms; }
+  button.btn:hover { background: var(--raised); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
+  button.btn.danger { color: var(--bad); border-color: transparent; background: transparent; }
+  button.btn.danger:hover { background: var(--bad-soft); }
+  button.btn.danger.armed { background: var(--bad); color: var(--panel); }
+  button.btn.small { padding: 4px 10px; font-size: 0.8rem; }
+  button.btn:disabled { opacity: 0.55; cursor: progress; }
+  .btn kbd { font: 600 0.68rem ui-monospace, monospace; opacity: 0.7; margin-left: 6px; }
+  .note { font-size: 0.84rem; color: var(--muted); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
-  .empty { border: 1px dashed var(--line); border-radius: 12px; padding: 1.4rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
-  .row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.7rem 0.9rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
-  .row .name { flex: 1 1 14rem; min-width: 0; }
-  .row .name b { font-weight: 600; }
-  details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
-  details .list { margin-top: 0.75rem; }
-  .err { color: var(--bad); font-size: 0.85rem; }
-  .chip.reboot { color: var(--warn); border-color: #4a3a12; }
-  .cmd { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; flex-basis: 100%; }
-  .cmd code { font: 0.8rem ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
-    padding: 0.3rem 0.55rem; user-select: all; overflow-wrap: anywhere; }
-  .banner { background: #2a2210; border: 1px solid #4a3a12; color: var(--warn); border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.88rem; }
-  @media (max-width: 560px) {
-    .wrap { padding: 1.25rem 1rem 3rem; gap: 1.5rem; }
-    .summary { grid-template-columns: 1fr; }
-    .summary dt { padding-top: 0.4rem; }
+  .cmd { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; flex-basis: 100%; }
+  .cmd code { background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; user-select: all; overflow-wrap: anywhere; }
+  .detail-empty { color: var(--muted); }
+  .detail-empty h1 { color: var(--ink); font-size: 1.25rem; margin-bottom: var(--u); }
+  .err { color: var(--bad); font-size: 0.88rem; }
+
+  /* loading skeleton */
+  .sk { background: linear-gradient(90deg, var(--raised), var(--rule), var(--raised)); background-size: 200% 100%; border-radius: 6px; animation: sk 1.2s ease-in-out infinite; }
+  @keyframes sk { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+  @media (max-width: 860px) {
+    .bar-in { flex-wrap: wrap; padding: var(--u) calc(var(--u) * 2); row-gap: var(--u); }
+    .search { order: 3; flex-basis: 100%; max-width: none; }
+    .search kbd, .counts span.l, .herdr span { display: none; }
+    .counts { margin-left: auto; }
+    .page { padding: calc(var(--u) * 2); gap: calc(var(--u) * 2.5); }
+    .board { grid-template-columns: 1fr; }
+    .detail { position: static; padding: calc(var(--u) * 2); box-shadow: none; }
+    /* on narrow screens the detail opens inside the map, right under the selected stop */
+    .stops .detail { margin: 4px calc(var(--u) * 1.5) var(--u) calc(var(--u) * 5); }
+    .summary { grid-template-columns: 1fr; gap: 4px; }
+    .summary dd + dt { margin-top: var(--u); }
+    .btn kbd { display: none; }
   }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div class="h"><h1>Parked sessions</h1><span class="who" id="who">…</span></div>
-    <p>Claude sessions closed to free memory, each with a summary of where it stood.
-      Resume opens a herdr workspace with the full conversation. Sessions idle for more than <span id="idle-days">3</span> days are parked automatically.</p>
-  </header>
+<header class="bar">
+  <div class="bar-in">
+    <div class="mark">
+      <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 4v24M23 4v9a7 7 0 0 1-7 7H9" stroke="#e4572e" stroke-width="3.5" fill="none" stroke-linecap="round"/><circle cx="9" cy="20" r="4" fill="currentColor"/></svg>
+      herdr-valet <span class="who" id="who"></span>
+    </div>
+    <label class="search">
+      <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="q" type="search" placeholder="Search parked sessions" aria-label="Search parked sessions" autocomplete="off">
+      <kbd>/</kbd>
+    </label>
+    <div class="counts" aria-live="polite"><div><b id="n-parked">–</b> <span class="l">parked</span></div><div><b id="n-live">–</b> <span class="l">open</span></div></div>
+    <div class="herdr" id="herdr"><i></i><span>herdr</span></div>
+  </div>
+</header>
 
-  <section>
-    <h2>Parked <span class="n" id="n-parked"></span></h2>
-    <div class="list" id="parked"><div class="empty">Loading…</div></div>
+<main class="page">
+  <div id="banner"></div>
+
+  <section aria-labelledby="h-open">
+    <h2 class="sect" id="h-open">Open now <span class="n" id="c-live"></span></h2>
+    <div class="platform" id="live"><div class="sk" style="height:42px;width:260px"></div><div class="sk" style="height:42px;width:220px"></div></div>
   </section>
 
-  <section>
-    <h2>Open now <span class="n" id="n-live"></span></h2>
-    <div class="list" id="live"></div>
+  <section class="board" aria-label="Parked sessions">
+    <nav class="map" id="map" aria-label="Parked sessions by project">
+      <div style="padding:8px 16px;display:grid;gap:12px"><div class="sk" style="height:16px;width:50%"></div><div class="sk" style="height:14px"></div><div class="sk" style="height:14px;width:80%"></div><div class="sk" style="height:14px;width:65%"></div></div>
+    </nav>
+    <article class="detail" id="detail" aria-live="polite"><div class="sk" style="height:22px;width:30%"></div><div class="sk" style="height:30px;width:75%"></div><div class="sk" style="height:90px"></div></article>
   </section>
-
-  <section>
-    <details>
-      <summary>Recently resumed</summary>
-      <div class="list" id="history"></div>
-    </details>
-  </section>
-</div>
+</main>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const days = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
 const ago = (iso) => { const d = days(iso); return d === null ? "—" : d === 0 ? "today" : d === 1 ? "1 day ago" : `${d} days ago`; };
+const short = (iso) => { const d = days(iso); return d === null ? "—" : d === 0 ? "today" : `${d}d`; };
+const narrow = matchMedia("(max-width: 860px)");
+// Held by reference: on narrow screens it lives inside the map, which is rebuilt on every render.
+const DETAIL = $("detail");
+
+// Line colors: a project keeps the same color everywhere, derived from its name. Mid-lightness
+// hues that hold up on both the light and the dark ground.
+const LINES = ["#e4572e", "#2a9d8f", "#e09f1f", "#4361ee", "#9b5de5", "#3f9e58", "#d1495b", "#1f8fd6", "#c06c84", "#6c8a2b"];
+function lineColor(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return LINES[h % LINES.length];
+}
+const project = (label) => (label || "?").split("/")[0];
 
 // The summary comes as "Title:", "Where we left off:", etc. (sometimes in bold). Cards written
 // before the switch to English use the Spanish labels: they map to the same fields.
@@ -127,7 +249,7 @@ async function post(path) {
 function commandBox(cmd) {
   const box = document.createElement("div");
   box.className = "cmd";
-  box.innerHTML = `<code>${esc(cmd)}</code><button>Copy</button>`;
+  box.innerHTML = `<code>${esc(cmd)}</code><button class="btn small">Copy</button>`;
   const [code, btn] = [box.querySelector("code"), box.querySelector("button")];
   btn.onclick = async () => {
     try { await navigator.clipboard.writeText(cmd); btn.textContent = "Copied"; }
@@ -137,128 +259,242 @@ function commandBox(cmd) {
   return box;
 }
 
-function parkedCard(c) {
+let ST = null;          // last /api/state
+let selected = null;    // session_id of the selected stop
+let query = "";
+let busy = false;       // an action is in flight: don't re-render under the user
+
+function matches(c) {
+  if (!query) return true;
+  const hay = [c.label, c.cwd, c.branch, c.model, c.summary].join(" ").toLowerCase();
+  return query.split(/\s+/).every((w) => hay.includes(w));
+}
+const visibleCards = () => ST.parked.filter(matches);
+const isReboot = (c) => c.reason === "reboot" || c.reason === "reinicio";
+
+// ------------------------------------------------------------------ open now
+function renderLive() {
+  const live = $("live");
+  live.replaceChildren();
+  $("c-live").textContent = ST.live.length || "";
+  if (ST.herdr_error) { live.innerHTML = `<p class="err">Could not read herdr: ${esc(ST.herdr_error)}</p>`; return; }
+  if (!ST.live.length) { live.innerHTML = `<p class="empty-line">No Claude sessions open in herdr.</p>`; return; }
+  [...ST.live].sort((a, b) => (b.idle_days ?? 0) - (a.idle_days ?? 0)).forEach((s) => {
+    const el = document.createElement("div");
+    el.className = "open";
+    el.style.setProperty("--line", lineColor(project(s.label)));
+    const working = s.status === "working" || s.status === "blocked";
+    const idle = s.idle_days == null ? "idle" : s.idle_days < 1 ? "idle today" : `idle ${Math.floor(s.idle_days)}d`;
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="nm">${esc(s.label)}</span>
+      <span class="fd">${esc((s.cwd || "").split("/").pop())}</span>
+      <span class="st ${working ? "working" : ""}">${working ? (s.status === "blocked" ? "waiting" : "working") : idle}</span>
+      ${working ? "" : `<button class="btn small">Park</button>`}<span class="note"></span>`;
+    const btn = el.querySelector("button"), note = el.querySelector(".note");
+    if (btn) btn.onclick = async () => {
+      busy = true; btn.disabled = true; note.className = "note"; note.textContent = "Summarizing and closing… ~15 s";
+      try { const r = await post(`api/park/${encodeURIComponent(s.pane_id)}`); selected = r.card?.session_id || selected; busy = false; load(); }
+      catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; btn.disabled = false; }
+    };
+    live.append(el);
+  });
+}
+
+// ------------------------------------------------------------------ the line map
+function renderMap() {
+  const map = $("map");
+  if (map.contains(DETAIL)) map.after(DETAIL);
+  map.replaceChildren();
+  const cards = visibleCards();
+  if (!ST.parked.length) map.innerHTML = `<p class="map-empty">No parked sessions yet.</p>`;
+  else if (!cards.length) map.innerHTML = `<p class="map-empty">Nothing matches “${esc(query)}”.</p>`;
+  // Group by project; the API already sorts newest first, so lines follow their latest stop.
+  const groups = new Map();
+  for (const c of cards) {
+    const p = project(c.label);
+    if (!groups.has(p)) groups.set(p, []);
+    groups.get(p).push(c);
+  }
+  for (const [p, list] of groups) {
+    const sec = document.createElement("section");
+    sec.className = "line";
+    sec.style.setProperty("--line", lineColor(p));
+    sec.innerHTML = `<h3 class="line-h"><span class="bullet" aria-hidden="true"></span>${esc(p)}<span class="ct">${list.length}</span></h3><ol class="stops"></ol>`;
+    const ol = sec.querySelector("ol");
+    for (const c of list) {
+      const s = parseSummary(c.summary);
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.className = "stop" + (isReboot(c) ? " reboot" : "");
+      b.dataset.id = c.session_id;
+      b.setAttribute("aria-current", String(c.session_id === selected));
+      b.innerHTML = `<span class="node" aria-hidden="true"></span><span class="t">${esc(s["Title"] || c.label)}</span><span class="a" title="Last message">${short(c.last_activity || c.parked_at)}</span>`;
+      b.onclick = () => select(c.session_id, true);
+      li.append(b);
+      ol.append(li);
+    }
+    map.append(sec);
+  }
+  // Terminus: recently resumed, in grey, at the end of the map.
+  if (ST.history.length && !query) {
+    const sec = document.createElement("section");
+    sec.className = "line terminus";
+    sec.innerHTML = `<h3 class="line-h"><span class="bullet" aria-hidden="true"></span>Recently resumed<span class="ct">${ST.history.length}</span></h3><ol class="stops"></ol>`;
+    const ol = sec.querySelector("ol");
+    for (const c of ST.history.slice(0, 8)) {
+      const s = parseSummary(c.summary);
+      const li = document.createElement("li");
+      li.innerHTML = `<div class="stop"><span class="node" aria-hidden="true"></span><span class="t">${esc(s["Title"] || c.label)}</span><span class="a">${short(new Date(c.resumed_at * 1000).toISOString())}</span></div>`;
+      ol.append(li);
+    }
+    map.append(sec);
+  }
+}
+
+// ------------------------------------------------------------------ detail
+function renderDetail() {
+  const d = DETAIL;
+  d.replaceChildren();
+  const c = ST.parked.find((x) => x.session_id === selected);
+  if (!c) {
+    d.style.removeProperty("--line");
+    d.innerHTML = `<div class="detail-empty"><h1>${ST.parked.length ? "Pick a stop" : "Nothing parked"}</h1>
+      <p>${ST.parked.length
+        ? "Choose a session on the map to see where you left off and resume it."
+        : `Sessions idle for more than ${esc(ST.idle_days)} days park themselves here, with a summary of where you left off. You can also park an open one with <b>Park</b>.`}</p></div>`;
+    placeDetail();
+    return;
+  }
   const s = parseSummary(c.summary);
-  const el = document.createElement("article");
-  el.className = "card";
-  el.innerHTML = `
-    <div class="card-top">
-      <div class="t">
-        <h3>${esc(s["Title"] || c.label)}</h3>
-        <div class="meta">
-          <span class="chip">${esc(c.label)}</span>
-          <span class="chip age" title="Last message">${ago(c.last_activity || c.parked_at)}</span>
-          ${c.branch ? `<span class="chip">${esc(c.branch)}</span>` : ""}
-          <span class="chip">${esc(c.model || "default model")}</span>
-          ${c.reason === "auto" ? `<span class="chip idle">parked automatically</span>` : ""}
-          ${c.reason === "reboot" || c.reason === "reinicio" ? `<span class="chip reboot" title="It was open when the machine rebooted">cut off by a reboot</span>` : ""}
-        </div>
-      </div>
+  const p = project(c.label);
+  const sub = c.label.includes("/") ? c.label.split("/").slice(1).join("/") : "";
+  d.style.setProperty("--line", lineColor(p));
+  d.innerHTML = `
+    <span class="sign"><span class="bullet" aria-hidden="true"></span>${esc(p)}${sub ? `<span class="sub">/ ${esc(sub)}</span>` : ""}</span>
+    <h1>${esc(s["Title"] || c.label)}</h1>
+    <div class="facts">
+      <span title="Last message">Last active <b>${ago(c.last_activity || c.parked_at)}</b></span>
+      ${c.branch ? `<span>Branch <b class="mono">${esc(c.branch)}</b></span>` : ""}
+      <span>Model <b>${esc(c.model || "default")}</b></span>
+      ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : `<span>Parked by hand</span>`}
     </div>
     <dl class="summary">
-      ${["Where we left off", "Still pending", "Next step"].filter((k) => s[k]).map((k) => `<dt>${k}</dt><dd>${esc(s[k])}</dd>`).join("")}
+      ${s["Where we left off"] ? `<dt>Where we left off</dt><dd>${esc(s["Where we left off"])}</dd>` : ""}
+      ${s["Still pending"] ? `<dt>Still pending</dt><dd>${esc(s["Still pending"])}</dd>` : ""}
+      ${s["Next step"] ? `<dt>Next step</dt><dd class="next">${esc(s["Next step"])}</dd>` : ""}
     </dl>
-    <div class="path">${esc(c.cwd)}</div>
+    <div class="path mono" title="Directory">${esc(c.cwd)}</div>
     <div class="actions">
-      <button class="primary" data-act="resume">Resume in herdr</button>
-      <button class="danger" data-act="delete">Delete card</button>
+      <button class="btn primary" data-act="resume">Resume in herdr<kbd>↵</kbd></button>
+      <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>`;
-  const note = el.querySelector(".note");
-  const [resume, del] = el.querySelectorAll("button");
+  const note = d.querySelector(".note");
+  const [resume, del] = d.querySelectorAll("button");
   resume.onclick = async () => {
-    resume.disabled = del.disabled = true;
+    busy = true; resume.disabled = del.disabled = true;
     note.className = "note"; note.textContent = "Opening…";
     try {
       await post(`api/resume/${c.session_id}`);
       note.className = "note ok";
-      note.textContent = `Done: workspace "${c.label.split("/")[0]}" in herdr, with the conversation loaded.`;
-      setTimeout(load, 2500);
+      note.textContent = `Done: workspace “${p}” is open in herdr with the conversation loaded.`;
+      setTimeout(() => { busy = false; selected = null; load(); }, 2200);
     } catch (e) {
+      busy = false;
       note.className = "note bad"; note.textContent = e.message; resume.disabled = del.disabled = false;
-      el.querySelector(".cmd")?.remove();
-      if (e.command) el.querySelector(".actions").append(commandBox(e.command));
+      d.querySelector(".cmd")?.remove();
+      if (e.command) d.querySelector(".actions").append(commandBox(e.command));
     }
   };
-  // Confirmation inside the card, not a browser dialog.
+  // Confirmation in place, not a browser dialog.
   del.onclick = async () => {
-    if (del.dataset.armed !== "1") {
-      del.dataset.armed = "1"; del.textContent = "Sure? Tap again";
-      note.className = "note"; note.textContent = "Claude keeps the conversation; only the card is deleted.";
-      setTimeout(() => { del.dataset.armed = ""; del.textContent = "Delete card"; note.textContent = ""; }, 5000);
+    if (!del.classList.contains("armed")) {
+      del.classList.add("armed"); del.textContent = "Delete? Click again";
+      note.className = "note"; note.textContent = "Claude keeps the conversation; only the card goes.";
+      setTimeout(() => { del.classList.remove("armed"); del.textContent = "Delete card"; if (note.textContent.startsWith("Claude")) note.textContent = ""; }, 5000);
       return;
     }
-    del.disabled = resume.disabled = true;
-    try { await post(`api/delete/${c.session_id}`); el.remove(); load(); }
-    catch (e) { note.className = "note bad"; note.textContent = e.message; del.disabled = resume.disabled = false; }
+    busy = true; del.disabled = resume.disabled = true;
+    try { const next = neighbor(1) || neighbor(-1); await post(`api/delete/${c.session_id}`); selected = next; busy = false; load(); }
+    catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; del.disabled = resume.disabled = false; }
   };
-  return el;
+  placeDetail();
 }
 
-function liveRow(s) {
-  const el = document.createElement("div");
-  el.className = "row";
-  const folder = (s.cwd || "").split("/").pop();
-  const busy = s.status === "working" || s.status === "blocked";
-  el.innerHTML = `
-    <div class="name"><b>${esc(s.label)}</b> <span class="path">${esc(folder)}</span></div>
-    <span class="chip ${busy ? "working" : "idle"}">${busy ? "working" : `idle ${s.idle_days == null ? "?" : s.idle_days < 1 ? "today" : Math.floor(s.idle_days) + " d"}`}</span>
-    ${busy ? "" : `<button>Park</button>`}
-    <span class="note"></span>`;
-  const btn = el.querySelector("button");
-  const note = el.querySelector(".note");
-  if (btn) btn.onclick = async () => {
-    btn.disabled = true; note.className = "note"; note.textContent = "Summarizing and closing… (~15 s)";
-    try { await post(`api/park/${encodeURIComponent(s.pane_id)}`); load(); }
-    catch (e) { note.className = "note bad"; note.textContent = e.message; btn.disabled = false; }
-  };
-  return el;
+// Desktop: the detail sits beside the map. Narrow: it opens inside the map under its stop.
+function placeDetail() {
+  const d = DETAIL;
+  const stop = selected && document.querySelector(`.stop[data-id="${CSS.escape(selected)}"]`);
+  if (narrow.matches && stop) stop.parentElement.after(d);
+  else if (d.previousElementSibling !== $("map")) $("map").after(d);
+}
+narrow.addEventListener("change", placeDetail);
+
+function neighbor(step) {
+  const ids = visibleCards().map((c) => c.session_id);
+  const i = ids.indexOf(selected);
+  return i < 0 ? null : ids[i + step] ?? null;
 }
 
-function historyRow(c) {
-  const s = parseSummary(c.summary);
-  const el = document.createElement("div");
-  el.className = "row";
-  el.innerHTML = `<div class="name"><b>${esc(s["Title"] || c.label)}</b> <span class="path">${esc(c.label)}</span></div>
-    <span class="chip idle">resumed ${ago(new Date(c.resumed_at * 1000).toISOString())}</span>`;
-  return el;
+function select(id, focus) {
+  selected = id;
+  document.querySelectorAll(".map .stop[data-id]").forEach((b) => b.setAttribute("aria-current", String(b.dataset.id === id)));
+  renderDetail();
+  if (focus) document.querySelector(`.stop[data-id="${CSS.escape(id)}"]`)?.focus({ preventScroll: narrow.matches });
 }
 
+function keepSelection() {
+  const vis = visibleCards();
+  if (!vis.some((c) => c.session_id === selected)) selected = narrow.matches ? null : vis[0]?.session_id ?? null;
+}
+
+// ------------------------------------------------------------------ load
 async function load() {
+  if (busy) return;
   try {
     const r = await fetch("api/state", { cache: "no-store" });
-    const st = await r.json();
-    $("who").textContent = st.user;
-    document.title = `Parked · ${st.user}`;
-    $("idle-days").textContent = st.idle_days;
-
-    document.querySelector(".banner")?.remove();
-    if (!st.herdr_running) {
-      const b = document.createElement("div");
-      b.className = "banner";
-      b.textContent = "herdr is not running (did the machine reboot?). Resuming from here needs herdr: open the terminal, or use the command shown when you press Resume.";
-      document.querySelector("header").after(b);
-    }
-
-    $("n-parked").textContent = st.parked.length || "";
-    const parked = $("parked"); parked.replaceChildren();
-    if (!st.parked.length) parked.innerHTML = `<div class="empty">No parked sessions.</div>`;
-    st.parked.forEach((c) => parked.append(parkedCard(c)));
-
-    $("n-live").textContent = st.live.length || "";
-    const live = $("live"); live.replaceChildren();
-    if (st.herdr_error) live.innerHTML = `<p class="err">Could not read herdr: ${esc(st.herdr_error)}</p>`;
-    else if (!st.live.length) live.innerHTML = `<div class="empty">No Claude sessions open in herdr.</div>`;
-    [...st.live].sort((a, b) => (b.idle_days ?? 0) - (a.idle_days ?? 0)).forEach((s) => live.append(liveRow(s)));
-
-    const hist = $("history"); hist.replaceChildren();
-    if (!st.history.length) hist.innerHTML = `<div class="empty">None yet.</div>`;
-    st.history.forEach((c) => hist.append(historyRow(c)));
+    ST = await r.json();
+    $("who").textContent = ST.user;
+    document.title = `herdr-valet · ${ST.parked.length} parked`;
+    $("n-parked").textContent = ST.parked.length;
+    $("n-live").textContent = ST.live.length;
+    $("herdr").classList.toggle("down", !ST.herdr_running);
+    $("herdr").title = ST.herdr_running ? "herdr is running" : "herdr is not running";
+    $("banner").innerHTML = ST.herdr_running ? "" :
+      `<div class="banner" role="status">herdr is not running — did the machine reboot? Resume needs it: open the terminal, or press Resume to get a command to run by hand.</div>`;
+    keepSelection();
+    renderLive();
+    renderMap();
+    renderDetail();
   } catch (e) {
-    $("parked").innerHTML = `<p class="err">Could not load: ${esc(e.message)}</p>`;
+    $("map").innerHTML = `<p class="map-empty err">Could not load: ${esc(e.message)}</p>`;
   }
 }
+
+$("q").addEventListener("input", (e) => {
+  query = e.target.value.trim().toLowerCase();
+  keepSelection();
+  renderMap(); renderDetail();
+});
+
+// Keyboard: "/" searches, ↑/↓ (or j/k) move along the map, Enter resumes, Esc clears search.
+document.addEventListener("keydown", (e) => {
+  const typing = e.target.matches("input, textarea");
+  if (e.key === "/" && !typing) { e.preventDefault(); $("q").focus(); return; }
+  if (e.key === "Escape" && (typing || query)) { const q = $("q"); q.value = ""; q.dispatchEvent(new Event("input")); q.blur(); return; }
+  if (typing || !ST) return;
+  if (["ArrowDown", "j", "ArrowUp", "k"].includes(e.key)) {
+    const step = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
+    const next = neighbor(step) ?? (selected ? null : visibleCards()[0]?.session_id);
+    if (next) { e.preventDefault(); select(next, true); }
+  } else if (e.key === "Enter" && selected && (e.target === document.body || e.target.classList.contains("stop"))) {
+    e.preventDefault(); DETAIL.querySelector('[data-act="resume"]')?.click();
+  }
+});
+
 load();
+// Statuses change while the page sits open next to the terminal: refresh while it's visible.
+setInterval(() => { if (!document.hidden) load(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
 </script>
 </body>
 </html>
