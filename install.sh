@@ -12,7 +12,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$HOME/.local/bin/herdr-valet"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/herdr-valet"
 # Los servicios no heredan el PATH del shell: herdr y claude tienen que estar en alguno de estos.
-SVC_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+SVC_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 OS="$(uname -s)"
 
 say() { printf '  %s\n' "$*"; }

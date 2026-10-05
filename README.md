@@ -45,13 +45,16 @@ comando; las fichas y la config quedan.
 
 `~/.config/herdr-valet/config.toml`, ver [`config.example.toml`](config.example.toml). Lo más
 útil es `resume_command`: si lanzás Claude con un wrapper (secretos de MCP, flags, otra cuenta),
-ponelo ahí para que la sesión vuelva igual que como se abrió.
+ponelo ahí para que la sesión vuelva igual que como se abrió. `summary_command` hace lo mismo
+para los resúmenes: si una sesión era de una cuenta de trabajo, su resumen no debería salir por
+tu cuenta personal.
 
 ## Seguridad
 
 La página escucha solo en `127.0.0.1` y las acciones exigen un header que un formulario de otro
-sitio no puede mandar. Para verla desde otro dispositivo, ponele adelante un proxy **con
-autenticación**: puede reanudar y cerrar sesiones en tu máquina.
+sitio no puede mandar; solo responde con el `Host` de loopback (corta DNS rebinding). Para verla desde otro dispositivo, ponele adelante un proxy **con
+autenticación** que pase al backend `Host: 127.0.0.1:<port>` (el default de nginx con
+`proxy_pass http://127.0.0.1:<port>/`): la página puede reanudar y cerrar sesiones en tu máquina.
 
 ## Limitaciones
 

@@ -31,6 +31,10 @@ PORT = int(os.environ.get("HERDR_VALET_PORT") or valet.CONF["port"])
 SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 PAGE = Path(__file__).resolve().parent / "web.html"
+# Solo se atiende con el Host de loopback. Sin esto, DNS rebinding deja que una página de otro
+# sitio se vuelva "mismo origen" con esta y lea los resúmenes o mande acciones con X-Parking.
+# Un proxy delante (nginx con proxy_pass a 127.0.0.1) manda este Host por defecto.
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}", f"[::1]:{PORT}"}
 
 
 def state() -> dict:
@@ -70,7 +74,15 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, status: int, data) -> None:
         self._send(status, json.dumps(data, ensure_ascii=False).encode(), "application/json")
 
+    def _host_ok(self) -> bool:
+        if self.headers.get("Host", "") in ALLOWED_HOSTS:
+            return True
+        self._json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "Host no permitido"})
+        return False
+
     def do_GET(self):  # noqa: N802
+        if not self._host_ok():
+            return
         path = self.path.split("?")[0]
         if path in ("/", "/index.html"):
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
@@ -80,6 +92,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "no existe"})
 
     def do_POST(self):  # noqa: N802
+        if not self._host_ok():
+            return
         # Un formulario de otra página no puede mandar este header sin preflight (y no se
         # permite ninguno): las acciones solo salen de esta página.
         if self.headers.get("X-Parking") != "1":
