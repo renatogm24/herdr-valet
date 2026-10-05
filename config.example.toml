@@ -1,26 +1,26 @@
 # herdr-valet — ~/.config/herdr-valet/config.toml
-# Todas las claves son opcionales; sin ellas valen los defaults de acá abajo.
+# Every key is optional; without them the defaults below apply.
 
-# Días quieta antes de que el timer la aparque sola.
+# Days idle before the timer parks a session on its own.
 # idle_days = 3
 
-# Con qué se reanuda, dentro de un panel nuevo de herdr y en la carpeta de la ficha.
-# {session_id}, {cwd} y {model} se reemplazan ya entre comillas de shell. Si la sesión era de
-# otra cuenta (CLAUDE_CONFIG_DIR), se antepone sola.
-# Ejemplos: "claude --resume {session_id} --model {model}", o un launcher propio que ponga
-# secretos o flags: "mi-launcher resume {session_id}".
+# How to resume, inside a new herdr pane and in the card's directory.
+# {session_id}, {cwd} and {model} are substituted, already shell-quoted. If the session belonged
+# to another account (CLAUDE_CONFIG_DIR), that is prepended automatically.
+# Examples: "claude --resume {session_id} --model {model}", or your own launcher that sets
+# secrets or flags: "my-launcher resume {session_id}".
 # resume_command = "claude --resume {session_id}"
 
-# Modelo que escribe el resumen de cada ficha (claude -p --model ...).
+# Model that writes each card's summary (claude -p --model ...).
 # summary_model = "haiku"
 
-# Con qué se llama a Claude para el resumen. {session_id} se reemplaza; se le suman los flags
-# `-p --model ...`. Un wrapper sirve para mandar el resumen por la misma cuenta o proxy que usó la
-# sesión (tiene que terminar en `exec claude "$@"`).
+# How Claude is invoked for the summary. {session_id} is substituted; the `-p --model ...` flags
+# are appended. A wrapper can route the summary through the same account or proxy the session
+# used (it must end in `exec claude "$@"`).
 # summary_command = "claude"
 
-# Puerto de la página (127.0.0.1). Por defecto 8790 + (uid - 1000): uno por usuario.
+# Page port (127.0.0.1). Default 8790 + (uid - 1000): one per user.
 # port = 8790
 
-# Dónde viven las fichas.
+# Where cards live.
 # data_dir = "~/.local/share/herdr-valet"
