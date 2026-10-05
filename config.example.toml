@@ -1,0 +1,21 @@
+# herdr-valet — ~/.config/herdr-valet/config.toml
+# Todas las claves son opcionales; sin ellas valen los defaults de acá abajo.
+
+# Días quieta antes de que el timer la aparque sola.
+# idle_days = 3
+
+# Con qué se reanuda, dentro de un panel nuevo de herdr y en la carpeta de la ficha.
+# {session_id}, {cwd} y {model} se reemplazan ya entre comillas de shell. Si la sesión era de
+# otra cuenta (CLAUDE_CONFIG_DIR), se antepone sola.
+# Ejemplos: "claude --resume {session_id} --model {model}", o un launcher propio que ponga
+# secretos o flags: "mi-launcher resume {session_id}".
+# resume_command = "claude --resume {session_id}"
+
+# Modelo que escribe el resumen de cada ficha (claude -p --model ...).
+# summary_model = "haiku"
+
+# Puerto de la página (127.0.0.1). Por defecto 8790 + (uid - 1000): uno por usuario.
+# port = 8790
+
+# Dónde viven las fichas.
+# data_dir = "~/.local/share/herdr-valet"

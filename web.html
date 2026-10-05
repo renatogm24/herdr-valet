@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sesiones aparcadas</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0e18'/%3E%3Crect x='10' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3Crect x='18' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3C/svg%3E">
+<style>
+  /* Paleta oscura; sin dependencias externas: la página se sirve sola. */
+  :root {
+    --bg: #0b0e18; --panel: #121726; --raised: #182035; --line: #1f2940;
+    --fg: #e2e8f0; --body: #b6c2d4; --muted: #64748b;
+    --accent: #64b3f4; --ok: #34d399; --warn: #fbbf24; --bad: #f87171;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--fg); }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 2rem 1.25rem 4rem; display: flex; flex-direction: column; gap: 2rem; }
+  header { display: flex; flex-direction: column; gap: 0.4rem; }
+  header .h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.4rem 0.8rem; }
+  header h1 { font-size: 1.35rem; letter-spacing: -0.01em; }
+  header .who { font: 600 0.72rem ui-monospace, monospace; color: var(--accent); border: 1px solid #23406a; padding: 2px 8px; border-radius: 999px; }
+  header p { color: var(--muted); font-size: 0.88rem; max-width: 66ch; }
+  h2 { display: flex; align-items: center; gap: 0.6rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.14em; color: #64748b; margin-bottom: 0.9rem; }
+  h2::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  h2 .n { color: var(--accent); }
+  .list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.6rem; min-width: 0; }
+  .card-top { display: flex; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; }
+  .card-top .t { flex: 1 1 18rem; min-width: 0; }
+  .card h3 { font-size: 1rem; line-height: 1.35; text-wrap: balance; }
+  .meta { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.35rem; }
+  .chip { font: 500 0.7rem ui-monospace, monospace; color: var(--body); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .chip.age { color: var(--warn); border-color: #4a3a12; }
+  .chip.idle { color: var(--muted); }
+  .chip.working { color: var(--ok); border-color: #14532d; }
+  .summary { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.8rem; font-size: 0.88rem; color: var(--body); }
+  .summary dt { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; padding-top: 0.15rem; }
+  .summary dd { min-width: 0; overflow-wrap: anywhere; }
+  .path { font: 0.75rem ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+  .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-size: 0.85rem; border-radius: 8px; padding: 0.4rem 0.9rem; cursor: pointer; border: 1px solid var(--line); background: var(--raised); color: var(--fg); }
+  button:hover { border-color: #334155; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #07111f; font-weight: 600; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  .note { font-size: 0.82rem; color: var(--muted); }
+  .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
+  .empty { border: 1px dashed var(--line); border-radius: 12px; padding: 1.4rem; text-align: center; color: var(--muted); font-size: 0.9rem; }
+  .row { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; padding: 0.7rem 0.9rem; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .row .name { flex: 1 1 14rem; min-width: 0; }
+  .row .name b { font-weight: 600; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+  details .list { margin-top: 0.75rem; }
+  .err { color: var(--bad); font-size: 0.85rem; }
+  .chip.reboot { color: var(--warn); border-color: #4a3a12; }
+  .cmd { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; flex-basis: 100%; }
+  .cmd code { font: 0.8rem ui-monospace, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+    padding: 0.3rem 0.55rem; user-select: all; overflow-wrap: anywhere; }
+  .banner { background: #2a2210; border: 1px solid #4a3a12; color: var(--warn); border-radius: 10px; padding: 0.7rem 0.9rem; font-size: 0.88rem; }
+  @media (max-width: 560px) {
+    .wrap { padding: 1.25rem 1rem 3rem; gap: 1.5rem; }
+    .summary { grid-template-columns: 1fr; }
+    .summary dt { padding-top: 0.4rem; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="h"><h1>Sesiones aparcadas</h1><span class="who" id="who">…</span></div>
+    <p>Sesiones de Claude que se cerraron para liberar memoria, con un resumen de en qué estaban.
+      Reanudar abre un workspace en herdr con la conversación completa. Las quietas más de <span id="idle-days">3</span> días se aparcan solas.</p>
+  </header>
+
+  <section>
+    <h2>Aparcadas <span class="n" id="n-parked"></span></h2>
+    <div class="list" id="parked"><div class="empty">Cargando…</div></div>
+  </section>
+
+  <section>
+    <h2>Abiertas ahora <span class="n" id="n-live"></span></h2>
+    <div class="list" id="live"></div>
+  </section>
+
+  <section>
+    <details>
+      <summary>Reanudadas hace poco</summary>
+      <div class="list" id="history"></div>
+    </details>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const days = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
+const ago = (iso) => { const d = days(iso); return d === null ? "—" : d === 0 ? "hoy" : d === 1 ? "hace 1 día" : `hace ${d} días`; };
+
+// El resumen viene con "Título:", "En qué estábamos:", etc. (a veces en negrita).
+function parseSummary(text) {
+  const out = {};
+  for (const raw of (text || "").split("\n")) {
+    const line = raw.replace(/\*\*/g, "").trim();
+    const m = line.match(/^(Título|En qué estábamos|Quedó pendiente|Próximo paso):\s*(.*)$/);
+    if (m) out[m[1]] = m[2];
+  }
+  if (!Object.keys(out).length) out["En qué estábamos"] = text;
+  return out;
+}
+
+async function post(path) {
+  const r = await fetch(path, { method: "POST", headers: { "X-Parking": "1" } });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { command: data.command });
+  return data;
+}
+
+// Comando para copiar, con respaldo a seleccionar el texto si el navegador no deja copiar.
+function commandBox(cmd) {
+  const box = document.createElement("div");
+  box.className = "cmd";
+  box.innerHTML = `<code>${esc(cmd)}</code><button>Copiar</button>`;
+  const [code, btn] = [box.querySelector("code"), box.querySelector("button")];
+  btn.onclick = async () => {
+    try { await navigator.clipboard.writeText(cmd); btn.textContent = "Copiado"; }
+    catch { const r = document.createRange(); r.selectNodeContents(code); getSelection().removeAllRanges(); getSelection().addRange(r); btn.textContent = "Seleccionado"; }
+    setTimeout(() => (btn.textContent = "Copiar"), 2000);
+  };
+  return box;
+}
+
+function parkedCard(c) {
+  const s = parseSummary(c.summary);
+  const el = document.createElement("article");
+  el.className = "card";
+  el.innerHTML = `
+    <div class="card-top">
+      <div class="t">
+        <h3>${esc(s["Título"] || c.label)}</h3>
+        <div class="meta">
+          <span class="chip">${esc(c.label)}</span>
+          <span class="chip age" title="Último mensaje">${ago(c.last_activity || c.parked_at)}</span>
+          ${c.branch ? `<span class="chip">${esc(c.branch)}</span>` : ""}
+          <span class="chip">${esc(c.model || "modelo por defecto")}</span>
+          ${c.reason === "auto" ? `<span class="chip idle">aparcada sola</span>` : ""}
+          ${c.reason === "reinicio" ? `<span class="chip reboot" title="Estaba abierta cuando la PC se reinició">cortada por un reinicio</span>` : ""}
+        </div>
+      </div>
+    </div>
+    <dl class="summary">
+      ${["En qué estábamos", "Quedó pendiente", "Próximo paso"].filter((k) => s[k]).map((k) => `<dt>${k}</dt><dd>${esc(s[k])}</dd>`).join("")}
+    </dl>
+    <div class="path">${esc(c.cwd)}</div>
+    <div class="actions">
+      <button class="primary" data-act="resume">Reanudar en herdr</button>
+      <button class="danger" data-act="delete">Borrar ficha</button>
+      <span class="note"></span>
+    </div>`;
+  const note = el.querySelector(".note");
+  const [resume, del] = el.querySelectorAll("button");
+  resume.onclick = async () => {
+    resume.disabled = del.disabled = true;
+    note.className = "note"; note.textContent = "Abriendo…";
+    try {
+      await post(`api/resume/${c.session_id}`);
+      note.className = "note ok";
+      note.textContent = `Listo: workspace "${c.label.split("/")[0]}" en herdr, con la conversación cargada.`;
+      setTimeout(load, 2500);
+    } catch (e) {
+      note.className = "note bad"; note.textContent = e.message; resume.disabled = del.disabled = false;
+      el.querySelector(".cmd")?.remove();
+      if (e.command) el.querySelector(".actions").append(commandBox(e.command));
+    }
+  };
+  // Confirmación dentro de la tarjeta, no un diálogo del navegador.
+  del.onclick = async () => {
+    if (del.dataset.armed !== "1") {
+      del.dataset.armed = "1"; del.textContent = "¿Seguro? Toca otra vez";
+      note.className = "note"; note.textContent = "La conversación sigue guardada por Claude; solo se borra la ficha.";
+      setTimeout(() => { del.dataset.armed = ""; del.textContent = "Borrar ficha"; note.textContent = ""; }, 5000);
+      return;
+    }
+    del.disabled = resume.disabled = true;
+    try { await post(`api/delete/${c.session_id}`); el.remove(); load(); }
+    catch (e) { note.className = "note bad"; note.textContent = e.message; del.disabled = resume.disabled = false; }
+  };
+  return el;
+}
+
+function liveRow(s) {
+  const el = document.createElement("div");
+  el.className = "row";
+  const folder = (s.cwd || "").split("/").pop();
+  const busy = s.status === "working" || s.status === "blocked";
+  el.innerHTML = `
+    <div class="name"><b>${esc(s.label)}</b> <span class="path">${esc(folder)}</span></div>
+    <span class="chip ${busy ? "working" : "idle"}">${busy ? "trabajando" : `quieta ${s.idle_days == null ? "?" : s.idle_days < 1 ? "hoy" : Math.floor(s.idle_days) + " d"}`}</span>
+    ${busy ? "" : `<button>Aparcar</button>`}
+    <span class="note"></span>`;
+  const btn = el.querySelector("button");
+  const note = el.querySelector(".note");
+  if (btn) btn.onclick = async () => {
+    btn.disabled = true; note.className = "note"; note.textContent = "Resumiendo y cerrando… (~15 s)";
+    try { await post(`api/park/${encodeURIComponent(s.pane_id)}`); load(); }
+    catch (e) { note.className = "note bad"; note.textContent = e.message; btn.disabled = false; }
+  };
+  return el;
+}
+
+function historyRow(c) {
+  const s = parseSummary(c.summary);
+  const el = document.createElement("div");
+  el.className = "row";
+  el.innerHTML = `<div class="name"><b>${esc(s["Título"] || c.label)}</b> <span class="path">${esc(c.label)}</span></div>
+    <span class="chip idle">reanudada ${ago(new Date(c.resumed_at * 1000).toISOString())}</span>`;
+  return el;
+}
+
+async function load() {
+  try {
+    const r = await fetch("api/state", { cache: "no-store" });
+    const st = await r.json();
+    $("who").textContent = st.user;
+    document.title = `Aparcadas · ${st.user}`;
+    $("idle-days").textContent = st.idle_days;
+
+    document.querySelector(".banner")?.remove();
+    if (!st.herdr_running) {
+      const b = document.createElement("div");
+      b.className = "banner";
+      b.textContent = "herdr no está corriendo (¿la PC se reinició?). Reanudar desde acá necesita herdr: abre la terminal, o usa el comando que aparece al tocar Reanudar.";
+      document.querySelector("header").after(b);
+    }
+
+    $("n-parked").textContent = st.parked.length || "";
+    const parked = $("parked"); parked.replaceChildren();
+    if (!st.parked.length) parked.innerHTML = `<div class="empty">No hay sesiones aparcadas.</div>`;
+    st.parked.forEach((c) => parked.append(parkedCard(c)));
+
+    $("n-live").textContent = st.live.length || "";
+    const live = $("live"); live.replaceChildren();
+    if (st.herdr_error) live.innerHTML = `<p class="err">No pude leer herdr: ${esc(st.herdr_error)}</p>`;
+    else if (!st.live.length) live.innerHTML = `<div class="empty">No hay sesiones de Claude abiertas en herdr.</div>`;
+    [...st.live].sort((a, b) => (b.idle_days ?? 0) - (a.idle_days ?? 0)).forEach((s) => live.append(liveRow(s)));
+
+    const hist = $("history"); hist.replaceChildren();
+    if (!st.history.length) hist.innerHTML = `<div class="empty">Todavía ninguna.</div>`;
+    st.history.forEach((c) => hist.append(historyRow(c)));
+  } catch (e) {
+    $("parked").innerHTML = `<p class="err">No pude cargar: ${esc(e.message)}</p>`;
+  }
+}
+load();
+</script>
+</body>
+</html>
