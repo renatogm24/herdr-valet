@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Página web de herdr-valet (valet.py): ver qué había abierto, reanudar, borrar la ficha o
-aparcar una sesión abierta.
+"""herdr-valet web page (valet.py): see what was open, resume, delete a card or park an open
+session.
 
-Un proceso por persona, con su usuario (lo instala install.sh como servicio de usuario): solo ve
-su herdr y sus fichas. Escucha en 127.0.0.1 (puerto en la config; por defecto 8790 + (uid -
-1000)). Para verla desde otro dispositivo, ponerle adelante un proxy con autenticación: la
-página reanuda y cierra sesiones. Sin dependencias: biblioteca estándar.
+One process per person, under their own user (install.sh sets it up as a user service): it only
+sees that person's herdr and cards. Listens on 127.0.0.1 (port from the config; default 8790 +
+(uid - 1000)). To reach it from another device, put an authenticating proxy in front: the page
+resumes and closes sessions. No dependencies: standard library only.
 
-Reanudar desde acá abre un workspace en herdr con el comando de reanudación corriendo adentro:
-la conversación queda lista en la terminal, que es donde se trabaja.
+Resuming from here opens a herdr workspace with the resume command running inside: the
+conversation is ready in the terminal, which is where the work happens.
 """
 
 from __future__ import annotations
@@ -31,16 +31,16 @@ PORT = int(os.environ.get("HERDR_VALET_PORT") or valet.CONF["port"])
 SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 PAGE = Path(__file__).resolve().parent / "web.html"
-# Solo se atiende con el Host de loopback. Sin esto, DNS rebinding deja que una página de otro
-# sitio se vuelva "mismo origen" con esta y lea los resúmenes o mande acciones con X-Parking.
-# Un proxy delante (nginx con proxy_pass a 127.0.0.1) manda este Host por defecto.
+# Only requests with a loopback Host are served. Without this, DNS rebinding lets a page from
+# another site become "same origin" with this one, read the summaries and send actions with
+# X-Parking. A proxy in front (nginx with proxy_pass to 127.0.0.1) sends this Host by default.
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}", f"[::1]:{PORT}"}
 
 
 def state() -> dict:
     try:
         live, herdr_error = valet.live_sessions(), None
-    except Exception as e:  # noqa: BLE001 — sin herdr la página igual muestra las fichas
+    except Exception as e:  # noqa: BLE001 — without herdr the page still shows the cards
         live, herdr_error = [], str(e)
     history = []
     if valet.HISTORY.is_dir():
@@ -60,7 +60,7 @@ def state() -> dict:
 class Handler(BaseHTTPRequestHandler):
     server_version = "herdr-valet"
 
-    def log_message(self, fmt, *args):  # noqa: N802 — sin ruido en el journal por cada GET
+    def log_message(self, fmt, *args):  # noqa: N802 — no journal noise for every GET
         pass
 
     def _send(self, status: int, body: bytes, ctype: str) -> None:
@@ -77,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
     def _host_ok(self) -> bool:
         if self.headers.get("Host", "") in ALLOWED_HOSTS:
             return True
-        self._json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "Host no permitido"})
+        self._json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "Host not allowed"})
         return False
 
     def do_GET(self):  # noqa: N802
@@ -89,33 +89,33 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/state":
             self._json(200, state())
         else:
-            self._json(404, {"error": "no existe"})
+            self._json(404, {"error": "not found"})
 
     def do_POST(self):  # noqa: N802
         if not self._host_ok():
             return
-        # Un formulario de otra página no puede mandar este header sin preflight (y no se
-        # permite ninguno): las acciones solo salen de esta página.
+        # A form on another page cannot send this header without a preflight (and none is
+        # allowed): actions only come from this page.
         if self.headers.get("X-Parking") != "1":
-            self._json(HTTPStatus.FORBIDDEN, {"error": "falta X-Parking"})
+            self._json(HTTPStatus.FORBIDDEN, {"error": "missing X-Parking"})
             return
         m = re.fullmatch(r"/api/(resume|delete|park)/([^/]+)", self.path)
         if not m:
-            self._json(404, {"error": "no existe"})
+            self._json(404, {"error": "not found"})
             return
         action, target = m.groups()
         try:
             if action == "park":
                 if not PANE_RE.match(target):
-                    raise ValueError("panel inválido")
+                    raise ValueError("invalid pane")
                 card = valet.park(target, "manual")
                 self._json(200, {"ok": True, "card": card})
                 return
             if not SESSION_RE.match(target) or not valet.card_path(target).exists():
-                raise ValueError("no hay ficha para esa sesión")
+                raise ValueError("no card for that session")
             if action == "delete":
                 valet.card_path(target).unlink()
-                valet.log(f"borrada {target} (web)")
+                valet.log(f"deleted {target} (web)")
                 self._json(200, {"ok": True})
             else:
                 ws = valet.resume_in_herdr(target)
@@ -124,8 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 HTTPStatus.CONFLICT,
                 {
-                    "error": "herdr no está corriendo: abre la terminal (herdr) y vuelve a tocar "
-                    "Reanudar, o corre este comando en cualquier terminal",
+                    "error": "herdr is not running: open the terminal (herdr) and press Resume again, "
+                    "or run this command in any terminal",
                     "command": str(e),
                 },
             )

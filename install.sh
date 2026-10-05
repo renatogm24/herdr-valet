@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
-# Instala herdr-valet para el usuario actual: el comando `herdr-valet`, la config y dos
-# servicios de usuario (systemd en Linux, launchd en macOS):
-#   - auto: cada 10 min, foto de lo abierto + aparca lo quieto hace más de idle_days
-#   - web:  la página, en 127.0.0.1:<port>
+# Installs herdr-valet for the current user: the `herdr-valet` command, the config and two user
+# services (systemd on Linux, launchd on macOS):
+#   - auto: every 10 min, snapshot what is open + park sessions idle for more than idle_days
+#   - web:  the page, on 127.0.0.1:<port>
 #
-#   ./install.sh               instala o actualiza (re-correrlo después de un git pull)
-#   ./install.sh --uninstall   saca los servicios y el comando; las fichas y la config quedan
+#   ./install.sh               install or update (re-run it after a git pull)
+#   ./install.sh --uninstall   remove the services and the command; cards and config stay
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN="$HOME/.local/bin/herdr-valet"
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/herdr-valet"
-# Los servicios no heredan el PATH del shell: herdr y claude tienen que estar en alguno de estos.
+# Services don't inherit the shell's PATH: herdr and claude must live in one of these.
 SVC_PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 OS="$(uname -s)"
 
 say() { printf '  %s\n' "$*"; }
 
-# Python 3.9 o más nuevo: el de Apple (Command Line Tools) es 3.9 y alcanza.
+# Python 3.9 or newer: Apple's (Command Line Tools) is 3.9, which is enough.
 PY=""
 for c in python3.13 python3.12 python3.11 python3.10 python3; do
   p="$(command -v "$c" 2>/dev/null)" || continue
@@ -29,9 +29,9 @@ systemd_install() {
   local d="$HOME/.config/systemd/user"
   mkdir -p "$d"
   cat >"$d/herdr-valet-auto.service" <<EOF
-# herdr-valet ($DIR): foto de lo abierto + aparca lo quieto. Lo dispara herdr-valet-auto.timer.
+# herdr-valet ($DIR): snapshot what is open + park idle sessions. Fired by herdr-valet-auto.timer.
 [Unit]
-Description=herdr-valet: aparcar sesiones quietas
+Description=herdr-valet: park idle sessions
 
 [Service]
 Type=oneshot
@@ -39,10 +39,10 @@ Environment=PATH=$SVC_PATH
 ExecStart=$PY $DIR/valet.py auto
 EOF
   cat >"$d/herdr-valet-auto.timer" <<EOF
-# Cada 10 minutos y 3 después de arrancar (recupera lo que cortó un reinicio). Con nada que
-# aparcar dura menos de un segundo.
+# Every 10 minutes and 3 after boot (recovers what a reboot cut off). With nothing to park it
+# takes under a second.
 [Unit]
-Description=herdr-valet: aparcar sesiones quietas (cada 10 min)
+Description=herdr-valet: park idle sessions (every 10 min)
 
 [Timer]
 OnBootSec=3min
@@ -54,9 +54,9 @@ Persistent=true
 WantedBy=timers.target
 EOF
   cat >"$d/herdr-valet-web.service" <<EOF
-# herdr-valet ($DIR): la página de sesiones aparcadas.
+# herdr-valet ($DIR): the parked sessions page.
 [Unit]
-Description=herdr-valet: página de sesiones aparcadas
+Description=herdr-valet: parked sessions page
 
 [Service]
 Environment=PATH=$SVC_PATH
@@ -69,19 +69,19 @@ WantedBy=default.target
 EOF
   systemctl --user daemon-reload
   systemctl --user enable --now herdr-valet-auto.timer >/dev/null
-  # restart y no solo start: un git pull que cambia la página tiene que verse sin pasos extra.
+  # restart, not just start: a git pull that changes the page must show up with no extra step.
   systemctl --user enable herdr-valet-web.service >/dev/null
   systemctl --user restart herdr-valet-web.service
-  say "✓ systemd: herdr-valet-auto.timer y herdr-valet-web.service"
+  say "✓ systemd: herdr-valet-auto.timer and herdr-valet-web.service"
   loginctl show-user "$USER" -p Linger 2>/dev/null | grep -q yes \
-    || say "! Sin linger los servicios solo corren con tu sesión abierta: sudo loginctl enable-linger $USER"
+    || say "! Without linger the services only run while you are logged in: sudo loginctl enable-linger $USER"
 }
 
 systemd_uninstall() {
   systemctl --user disable --now herdr-valet-auto.timer herdr-valet-web.service >/dev/null 2>&1 || true
   rm -f "$HOME/.config/systemd/user"/herdr-valet-{auto.service,auto.timer,web.service}
   systemctl --user daemon-reload
-  say "✓ servicios de systemd sacados"
+  say "✓ systemd services removed"
 }
 
 # --------------------------------------------------------------------------- macOS
@@ -116,7 +116,7 @@ launchd_install() {
     "  <key>StartInterval</key><integer>600</integer>"
   plist dev.herdr-valet.web "<string>$DIR/web.py</string>" \
     "  <key>KeepAlive</key><true/>"
-  say "✓ launchd: dev.herdr-valet.auto (cada 10 min) y dev.herdr-valet.web (logs en $LOGS)"
+  say "✓ launchd: dev.herdr-valet.auto (every 10 min) and dev.herdr-valet.web (logs in $LOGS)"
 }
 
 launchd_uninstall() {
@@ -124,33 +124,33 @@ launchd_uninstall() {
     launchctl bootout "gui/$(id -u)/$l" 2>/dev/null || true
     rm -f "$LA/$l.plist"
   done
-  say "✓ servicios de launchd sacados"
+  say "✓ launchd services removed"
 }
 
 # --------------------------------------------------------------------------- main
 if [ "${1:-}" = "--uninstall" ]; then
   case "$OS" in Darwin) launchd_uninstall ;; Linux) systemd_uninstall ;; esac
   rm -f "$BIN"
-  say "✓ listo. Fichas y config quedan en ~/.local/share/herdr-valet y $CONF_DIR"
+  say "✓ done. Cards and config stay in ~/.local/share/herdr-valet and $CONF_DIR"
   exit 0
 fi
 
 echo "herdr-valet"
-[ -n "$PY" ] || { say "✗ falta Python 3.9 o más nuevo"; exit 1; }
-command -v herdr >/dev/null || say "! herdr no está en el PATH (https://herdr.dev)"
-command -v claude >/dev/null || say "! claude no está en el PATH: sin él no hay resúmenes ni reanudar"
+[ -n "$PY" ] || { say "✗ Python 3.9 or newer is required"; exit 1; }
+command -v herdr >/dev/null || say "! herdr is not on PATH (https://herdr.dev)"
+command -v claude >/dev/null || say "! claude is not on PATH: without it there are no summaries and no resume"
 
 chmod +x "$DIR/valet.py" "$DIR/web.py"
 mkdir -p "$(dirname "$BIN")"
 ln -sf "$DIR/valet.py" "$BIN"
-say "✓ comando: $BIN"
+say "✓ command: $BIN"
 
 if [ ! -f "$CONF_DIR/config.toml" ]; then
   mkdir -p "$CONF_DIR"
   cp "$DIR/config.example.toml" "$CONF_DIR/config.toml"
   say "✓ config: $CONF_DIR/config.toml"
 fi
-"$PY" "$DIR/valet.py" config >/dev/null || { say "✗ la config tiene un error"; exit 1; }
+"$PY" "$DIR/valet.py" config >/dev/null || { say "✗ the config has an error"; exit 1; }
 
 case "$OS" in
   Darwin) launchd_install ;;
@@ -158,11 +158,11 @@ case "$OS" in
     if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
       systemd_install
     else
-      say "- sin systemd de usuario: corré 'herdr-valet auto' y 'web.py' como prefieras"
+      say "- no systemd user session: run 'herdr-valet auto' and 'web.py' however you prefer"
     fi
     ;;
-  *) say "- $OS: sin servicios; corré 'herdr-valet auto' y 'web.py' como prefieras" ;;
+  *) say "- $OS: no services; run 'herdr-valet auto' and 'web.py' however you prefer" ;;
 esac
 
 port="$("$PY" "$DIR/valet.py" config | sed -n 's/^port = //p')"
-say "✓ página: http://127.0.0.1:$port"
+say "✓ page: http://127.0.0.1:$port"

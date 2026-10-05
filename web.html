@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sesiones aparcadas</title>
+<title>Parked sessions</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230b0e18'/%3E%3Crect x='10' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3Crect x='18' y='8' width='4' height='16' rx='1' fill='%2364b3f4'/%3E%3C/svg%3E">
 <style>
-  /* Paleta oscura; sin dependencias externas: la página se sirve sola. */
+  /* Dark palette; no external dependencies: the page is self-contained. */
   :root {
     --bg: #0b0e18; --panel: #121726; --raised: #182035; --line: #1f2940;
     --fg: #e2e8f0; --body: #b6c2d4; --muted: #64748b;
@@ -69,24 +69,24 @@
 <body>
 <div class="wrap">
   <header>
-    <div class="h"><h1>Sesiones aparcadas</h1><span class="who" id="who">…</span></div>
-    <p>Sesiones de Claude que se cerraron para liberar memoria, con un resumen de en qué estaban.
-      Reanudar abre un workspace en herdr con la conversación completa. Las quietas más de <span id="idle-days">3</span> días se aparcan solas.</p>
+    <div class="h"><h1>Parked sessions</h1><span class="who" id="who">…</span></div>
+    <p>Claude sessions closed to free memory, each with a summary of where it stood.
+      Resume opens a herdr workspace with the full conversation. Sessions idle for more than <span id="idle-days">3</span> days are parked automatically.</p>
   </header>
 
   <section>
-    <h2>Aparcadas <span class="n" id="n-parked"></span></h2>
-    <div class="list" id="parked"><div class="empty">Cargando…</div></div>
+    <h2>Parked <span class="n" id="n-parked"></span></h2>
+    <div class="list" id="parked"><div class="empty">Loading…</div></div>
   </section>
 
   <section>
-    <h2>Abiertas ahora <span class="n" id="n-live"></span></h2>
+    <h2>Open now <span class="n" id="n-live"></span></h2>
     <div class="list" id="live"></div>
   </section>
 
   <section>
     <details>
-      <summary>Reanudadas hace poco</summary>
+      <summary>Recently resumed</summary>
       <div class="list" id="history"></div>
     </details>
   </section>
@@ -96,17 +96,23 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const days = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 86400000) : null;
-const ago = (iso) => { const d = days(iso); return d === null ? "—" : d === 0 ? "hoy" : d === 1 ? "hace 1 día" : `hace ${d} días`; };
+const ago = (iso) => { const d = days(iso); return d === null ? "—" : d === 0 ? "today" : d === 1 ? "1 day ago" : `${d} days ago`; };
 
-// El resumen viene con "Título:", "En qué estábamos:", etc. (a veces en negrita).
+// The summary comes as "Title:", "Where we left off:", etc. (sometimes in bold). Cards written
+// before the switch to English use the Spanish labels: they map to the same fields.
+const LABELS = {
+  "Title": "Title", "Where we left off": "Where we left off", "Still pending": "Still pending", "Next step": "Next step",
+  "Título": "Title", "En qué estábamos": "Where we left off", "Quedó pendiente": "Still pending", "Próximo paso": "Next step",
+};
 function parseSummary(text) {
   const out = {};
   for (const raw of (text || "").split("\n")) {
     const line = raw.replace(/\*\*/g, "").trim();
-    const m = line.match(/^(Título|En qué estábamos|Quedó pendiente|Próximo paso):\s*(.*)$/);
-    if (m) out[m[1]] = m[2];
+    const i = line.indexOf(":");
+    const key = i > 0 ? LABELS[line.slice(0, i).trim()] : null;
+    if (key) out[key] = line.slice(i + 1).trim();
   }
-  if (!Object.keys(out).length) out["En qué estábamos"] = text;
+  if (!Object.keys(out).length) out["Where we left off"] = text;
   return out;
 }
 
@@ -117,16 +123,16 @@ async function post(path) {
   return data;
 }
 
-// Comando para copiar, con respaldo a seleccionar el texto si el navegador no deja copiar.
+// Command to copy, falling back to selecting the text when the browser won't allow copying.
 function commandBox(cmd) {
   const box = document.createElement("div");
   box.className = "cmd";
-  box.innerHTML = `<code>${esc(cmd)}</code><button>Copiar</button>`;
+  box.innerHTML = `<code>${esc(cmd)}</code><button>Copy</button>`;
   const [code, btn] = [box.querySelector("code"), box.querySelector("button")];
   btn.onclick = async () => {
-    try { await navigator.clipboard.writeText(cmd); btn.textContent = "Copiado"; }
-    catch { const r = document.createRange(); r.selectNodeContents(code); getSelection().removeAllRanges(); getSelection().addRange(r); btn.textContent = "Seleccionado"; }
-    setTimeout(() => (btn.textContent = "Copiar"), 2000);
+    try { await navigator.clipboard.writeText(cmd); btn.textContent = "Copied"; }
+    catch { const r = document.createRange(); r.selectNodeContents(code); getSelection().removeAllRanges(); getSelection().addRange(r); btn.textContent = "Selected"; }
+    setTimeout(() => (btn.textContent = "Copy"), 2000);
   };
   return box;
 }
@@ -138,35 +144,35 @@ function parkedCard(c) {
   el.innerHTML = `
     <div class="card-top">
       <div class="t">
-        <h3>${esc(s["Título"] || c.label)}</h3>
+        <h3>${esc(s["Title"] || c.label)}</h3>
         <div class="meta">
           <span class="chip">${esc(c.label)}</span>
-          <span class="chip age" title="Último mensaje">${ago(c.last_activity || c.parked_at)}</span>
+          <span class="chip age" title="Last message">${ago(c.last_activity || c.parked_at)}</span>
           ${c.branch ? `<span class="chip">${esc(c.branch)}</span>` : ""}
-          <span class="chip">${esc(c.model || "modelo por defecto")}</span>
-          ${c.reason === "auto" ? `<span class="chip idle">aparcada sola</span>` : ""}
-          ${c.reason === "reinicio" ? `<span class="chip reboot" title="Estaba abierta cuando la PC se reinició">cortada por un reinicio</span>` : ""}
+          <span class="chip">${esc(c.model || "default model")}</span>
+          ${c.reason === "auto" ? `<span class="chip idle">parked automatically</span>` : ""}
+          ${c.reason === "reboot" || c.reason === "reinicio" ? `<span class="chip reboot" title="It was open when the machine rebooted">cut off by a reboot</span>` : ""}
         </div>
       </div>
     </div>
     <dl class="summary">
-      ${["En qué estábamos", "Quedó pendiente", "Próximo paso"].filter((k) => s[k]).map((k) => `<dt>${k}</dt><dd>${esc(s[k])}</dd>`).join("")}
+      ${["Where we left off", "Still pending", "Next step"].filter((k) => s[k]).map((k) => `<dt>${k}</dt><dd>${esc(s[k])}</dd>`).join("")}
     </dl>
     <div class="path">${esc(c.cwd)}</div>
     <div class="actions">
-      <button class="primary" data-act="resume">Reanudar en herdr</button>
-      <button class="danger" data-act="delete">Borrar ficha</button>
+      <button class="primary" data-act="resume">Resume in herdr</button>
+      <button class="danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>`;
   const note = el.querySelector(".note");
   const [resume, del] = el.querySelectorAll("button");
   resume.onclick = async () => {
     resume.disabled = del.disabled = true;
-    note.className = "note"; note.textContent = "Abriendo…";
+    note.className = "note"; note.textContent = "Opening…";
     try {
       await post(`api/resume/${c.session_id}`);
       note.className = "note ok";
-      note.textContent = `Listo: workspace "${c.label.split("/")[0]}" en herdr, con la conversación cargada.`;
+      note.textContent = `Done: workspace "${c.label.split("/")[0]}" in herdr, with the conversation loaded.`;
       setTimeout(load, 2500);
     } catch (e) {
       note.className = "note bad"; note.textContent = e.message; resume.disabled = del.disabled = false;
@@ -174,12 +180,12 @@ function parkedCard(c) {
       if (e.command) el.querySelector(".actions").append(commandBox(e.command));
     }
   };
-  // Confirmación dentro de la tarjeta, no un diálogo del navegador.
+  // Confirmation inside the card, not a browser dialog.
   del.onclick = async () => {
     if (del.dataset.armed !== "1") {
-      del.dataset.armed = "1"; del.textContent = "¿Seguro? Toca otra vez";
-      note.className = "note"; note.textContent = "La conversación sigue guardada por Claude; solo se borra la ficha.";
-      setTimeout(() => { del.dataset.armed = ""; del.textContent = "Borrar ficha"; note.textContent = ""; }, 5000);
+      del.dataset.armed = "1"; del.textContent = "Sure? Tap again";
+      note.className = "note"; note.textContent = "Claude keeps the conversation; only the card is deleted.";
+      setTimeout(() => { del.dataset.armed = ""; del.textContent = "Delete card"; note.textContent = ""; }, 5000);
       return;
     }
     del.disabled = resume.disabled = true;
@@ -196,13 +202,13 @@ function liveRow(s) {
   const busy = s.status === "working" || s.status === "blocked";
   el.innerHTML = `
     <div class="name"><b>${esc(s.label)}</b> <span class="path">${esc(folder)}</span></div>
-    <span class="chip ${busy ? "working" : "idle"}">${busy ? "trabajando" : `quieta ${s.idle_days == null ? "?" : s.idle_days < 1 ? "hoy" : Math.floor(s.idle_days) + " d"}`}</span>
-    ${busy ? "" : `<button>Aparcar</button>`}
+    <span class="chip ${busy ? "working" : "idle"}">${busy ? "working" : `idle ${s.idle_days == null ? "?" : s.idle_days < 1 ? "today" : Math.floor(s.idle_days) + " d"}`}</span>
+    ${busy ? "" : `<button>Park</button>`}
     <span class="note"></span>`;
   const btn = el.querySelector("button");
   const note = el.querySelector(".note");
   if (btn) btn.onclick = async () => {
-    btn.disabled = true; note.className = "note"; note.textContent = "Resumiendo y cerrando… (~15 s)";
+    btn.disabled = true; note.className = "note"; note.textContent = "Summarizing and closing… (~15 s)";
     try { await post(`api/park/${encodeURIComponent(s.pane_id)}`); load(); }
     catch (e) { note.className = "note bad"; note.textContent = e.message; btn.disabled = false; }
   };
@@ -213,8 +219,8 @@ function historyRow(c) {
   const s = parseSummary(c.summary);
   const el = document.createElement("div");
   el.className = "row";
-  el.innerHTML = `<div class="name"><b>${esc(s["Título"] || c.label)}</b> <span class="path">${esc(c.label)}</span></div>
-    <span class="chip idle">reanudada ${ago(new Date(c.resumed_at * 1000).toISOString())}</span>`;
+  el.innerHTML = `<div class="name"><b>${esc(s["Title"] || c.label)}</b> <span class="path">${esc(c.label)}</span></div>
+    <span class="chip idle">resumed ${ago(new Date(c.resumed_at * 1000).toISOString())}</span>`;
   return el;
 }
 
@@ -223,33 +229,33 @@ async function load() {
     const r = await fetch("api/state", { cache: "no-store" });
     const st = await r.json();
     $("who").textContent = st.user;
-    document.title = `Aparcadas · ${st.user}`;
+    document.title = `Parked · ${st.user}`;
     $("idle-days").textContent = st.idle_days;
 
     document.querySelector(".banner")?.remove();
     if (!st.herdr_running) {
       const b = document.createElement("div");
       b.className = "banner";
-      b.textContent = "herdr no está corriendo (¿la PC se reinició?). Reanudar desde acá necesita herdr: abre la terminal, o usa el comando que aparece al tocar Reanudar.";
+      b.textContent = "herdr is not running (did the machine reboot?). Resuming from here needs herdr: open the terminal, or use the command shown when you press Resume.";
       document.querySelector("header").after(b);
     }
 
     $("n-parked").textContent = st.parked.length || "";
     const parked = $("parked"); parked.replaceChildren();
-    if (!st.parked.length) parked.innerHTML = `<div class="empty">No hay sesiones aparcadas.</div>`;
+    if (!st.parked.length) parked.innerHTML = `<div class="empty">No parked sessions.</div>`;
     st.parked.forEach((c) => parked.append(parkedCard(c)));
 
     $("n-live").textContent = st.live.length || "";
     const live = $("live"); live.replaceChildren();
-    if (st.herdr_error) live.innerHTML = `<p class="err">No pude leer herdr: ${esc(st.herdr_error)}</p>`;
-    else if (!st.live.length) live.innerHTML = `<div class="empty">No hay sesiones de Claude abiertas en herdr.</div>`;
+    if (st.herdr_error) live.innerHTML = `<p class="err">Could not read herdr: ${esc(st.herdr_error)}</p>`;
+    else if (!st.live.length) live.innerHTML = `<div class="empty">No Claude sessions open in herdr.</div>`;
     [...st.live].sort((a, b) => (b.idle_days ?? 0) - (a.idle_days ?? 0)).forEach((s) => live.append(liveRow(s)));
 
     const hist = $("history"); hist.replaceChildren();
-    if (!st.history.length) hist.innerHTML = `<div class="empty">Todavía ninguna.</div>`;
+    if (!st.history.length) hist.innerHTML = `<div class="empty">None yet.</div>`;
     st.history.forEach((c) => hist.append(historyRow(c)));
   } catch (e) {
-    $("parked").innerHTML = `<p class="err">No pude cargar: ${esc(e.message)}</p>`;
+    $("parked").innerHTML = `<p class="err">Could not load: ${esc(e.message)}</p>`;
   }
 }
 load();
