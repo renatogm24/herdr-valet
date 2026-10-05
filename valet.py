@@ -263,20 +263,26 @@ def summarize(p: Path) -> str:
         return "Sesión sin conversación."
     # El transcript se llama <session_id>.jsonl.
     cmd = [a.replace("{session_id}", p.stem) for a in shlex.split(CONF["summary_command"])]
-    try:
-        out = subprocess.run(
-            [
-                *cmd, "-p", "--model", CONF["summary_model"], "--no-session-persistence",
-                "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SUMMARY_PROMPT,
-            ],
-            input=f"Primer pedido: {first}\n\n<transcript>\n{tail}\n</transcript>",
-            capture_output=True, text=True, timeout=180,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-        log(f"resumen falló ({out.returncode}): {out.stderr.strip()[:200]}")
-    except Exception as e:  # noqa: BLE001 — sin resumen igual se aparca
-        log(f"resumen falló: {e}")
+    # --tools "": sin herramientas. Con ellas Haiku a veces intenta leer un archivo que nombra
+    # el transcript, -p le niega el permiso y esa negativa quedaba como resumen. Y el transcript
+    # no es confiable: una inyección podría hacerle leer archivos y volcarlos en la página.
+    args = [
+        *cmd, "-p", "--model", CONF["summary_model"], "--no-session-persistence", "--tools", "",
+        "--strict-mcp-config", "--setting-sources", "", "--system-prompt", SUMMARY_PROMPT,
+    ]
+    prompt = f"Primer pedido: {first}\n\n<transcript>\n{tail}\n</transcript>"
+    # Una respuesta sin "Título:" no es un resumen (una negativa, un error): se reintenta una vez.
+    for attempt in (1, 2):
+        try:
+            out = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=180)
+        except Exception as e:  # noqa: BLE001 — sin resumen igual se aparca
+            log(f"resumen falló: {e}")
+            break
+        text = out.stdout.strip()
+        if out.returncode == 0 and title({"summary": text}):
+            return text
+        reason = f"código {out.returncode}: {out.stderr.strip()[:200]}" if out.returncode else f"sin 'Título:': {text[:200]!r}"
+        log(f"resumen inválido (intento {attempt}, {reason})")
     return f"(sin resumen automático) Primer pedido: {first}"
 
 
