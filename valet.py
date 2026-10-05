@@ -131,6 +131,7 @@ def live_sessions() -> list[dict]:
             if p.get("agent") != "claude" or not sess.get("value"):
                 continue
             tr = transcript_path(sess["value"])
+            since = active_since(sess["value"], tr)
             rows.append(
                 {
                     "pane_id": p["pane_id"],
@@ -142,8 +143,8 @@ def live_sessions() -> list[dict]:
                     "status": p.get("agent_status"),
                     "focused": bool(p.get("focused")),
                     "transcript": str(tr) if tr else None,
-                    "last_activity": mtime_iso(tr) if tr else None,
-                    "idle_days": idle_days(tr) if tr else None,
+                    "last_activity": since.isoformat(timespec="seconds") if since else None,
+                    "idle_days": days_since(since) if since else None,
                 }
             )
     return rows
@@ -169,6 +170,68 @@ def boot_id() -> str:
         out = subprocess.run(["/usr/sbin/sysctl", "-n", "kern.boottime"], capture_output=True, text=True)
         return out.stdout.strip()
     return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+
+
+# --------------------------------------------------------------------------- claude processes
+def claude_processes() -> list[dict]:
+    """Live Claude processes, from the <config dir>/sessions/<pid>.json files Claude Code keeps
+    (pid, sessionId, kind, status, cwd). Includes forks and background agents ("bg"), which run
+    under Claude's daemon outside any pane."""
+    procs = []
+    for base in CONFIG_DIRS:
+        for f in (base / "sessions").glob("*.json"):
+            try:
+                d = json.loads(f.read_text())
+                pid = int(d["pid"])
+            except (ValueError, KeyError, TypeError, OSError):
+                continue
+            if pid != os.getpid() and _alive(pid):
+                procs.append(d)
+    return procs
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def process_env(pid: int) -> dict:
+    """Environment of a process we own: /proc on Linux, `ps -E` on macOS."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["ps", "-E", "-ww", "-o", "command=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=5).stdout
+            return dict(w.split("=", 1) for w in out.split() if "=" in w and w.split("=", 1)[0].isupper())
+        raw = Path(f"/proc/{pid}/environ").read_bytes()
+        return dict(kv.split("=", 1) for kv in raw.decode(errors="replace").split("\0") if "=" in kv)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+
+
+def session_owners(session_id: str) -> list[int]:
+    return [int(d["pid"]) for d in claude_processes() if d.get("sessionId") == session_id]
+
+
+def kill_strays(session_id: str, pane_id: str) -> list[int]:
+    """SIGTERM every Claude process still holding the session or the pane after it closed.
+    Forks and background agents inherit HERDR_PANE_ID, herdr may even report a fork's session
+    as the pane's, and closing the pane does not reach them: left alive, resuming the session
+    later would start a second writer on the same transcript."""
+    killed = []
+    for d in claude_processes():
+        pid = int(d["pid"])
+        if d.get("sessionId") == session_id or process_env(pid).get("HERDR_PANE_ID") == pane_id:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                killed.append(pid)
+            except (ProcessLookupError, PermissionError):
+                pass
+    return killed
 
 
 # --------------------------------------------------------------------------- transcript
@@ -217,8 +280,24 @@ def mtime_iso(p: Path) -> str:
     return last_activity(p).isoformat(timespec="seconds")
 
 
-def idle_days(p: Path) -> float:
-    return round((datetime.now(timezone.utc) - last_activity(p)).total_seconds() / 86400, 2)
+def days_since(t: datetime) -> float:
+    return round((datetime.now(timezone.utc) - t).total_seconds() / 86400, 2)
+
+
+def active_since(session_id: str, tr: Path | None) -> datetime | None:
+    """The later of the last message and the last resume. Resuming writes no message, so a
+    session parked after 4 idle days would read "4 days idle" again right after coming back,
+    and the timer would park it within minutes."""
+    times = [last_activity(tr)] if tr else []
+    hist = HISTORY / f"{session_id}.json"
+    if hist.exists():
+        try:
+            resumed = json.loads(hist.read_text()).get("resumed_at")
+            if resumed:
+                times.append(datetime.fromisoformat(resumed))
+        except ValueError:
+            pass
+    return max(times) if times else None
 
 
 def _text(content) -> str:
@@ -349,7 +428,9 @@ def park(pane_id: str, reason: str) -> dict:
     # The card is written BEFORE closing: if something fails afterwards, the context is not lost.
     card = write_card(live["session_id"], display_label(live), live["cwd"], reason)
     close_pane(live)
-    log(f"parked {card['session_id']} ({card['label']}, {reason}, idle {live['idle_days']} d)")
+    strays = kill_strays(live["session_id"], pane_id)
+    log(f"parked {card['session_id']} ({card['label']}, {reason}, idle {live['idle_days']} d)"
+        + (f", stopped stray claude {strays}" if strays else ""))
     return card
 
 
@@ -445,11 +526,15 @@ def resume_command(c: dict) -> str:
 
 
 def mark_resumed(session_id: str) -> None:
-    """Move the card to history: the page lists recently resumed sessions."""
+    """Move the card to history with the resume time: the page lists recently resumed
+    sessions, and the timer counts idle time from it (see active_since)."""
     HISTORY.mkdir(parents=True, exist_ok=True)
     src = card_path(session_id)
     if src.exists():
-        src.rename(HISTORY / src.name)
+        card = json.loads(src.read_text())
+        card["resumed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        (HISTORY / src.name).write_text(json.dumps(card, ensure_ascii=False, indent=2))
+        src.unlink()
 
 
 def resume_in_herdr(session_id: str) -> str:
@@ -461,6 +546,11 @@ def resume_in_herdr(session_id: str) -> str:
         raise HerdrDown(f"cd {shlex.quote(c['cwd'] or str(HOME))} && {cmd}")
     if c["cwd"] and not Path(c["cwd"]).is_dir():
         raise ValueError(f"directory no longer exists: {c['cwd']}")
+    # A second copy would write to the same transcript as the one still running.
+    owners = session_owners(session_id)
+    if owners:
+        raise ValueError(f"this session is already running (claude pid {', '.join(map(str, owners))}): "
+                         "switch to it in herdr, or stop it before resuming here")
     ws = herdr("workspace", "create", "--cwd", c["cwd"] or str(HOME), "--label", c["label"].split("/")[0], "--no-focus")
     ws_id = ws["workspace"]["workspace_id"]
     pane = herdr("pane", "list", "--workspace", ws_id)["panes"][0]["pane_id"]
