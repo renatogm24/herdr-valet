@@ -125,13 +125,16 @@ def herdr(*args: str) -> dict:
 def live_sessions() -> list[dict]:
     """herdr panes running Claude with their session id, plus the transcript's last activity."""
     rows = []
+    procs = {int(d["pid"]): d for d in claude_processes()}
     for ws in herdr("workspace", "list")["workspaces"]:
         for p in herdr("pane", "list", "--workspace", ws["workspace_id"])["panes"]:
-            sess = p.get("agent_session") or {}
-            if p.get("agent") != "claude" or not sess.get("value"):
+            if p.get("agent") != "claude":
                 continue
-            tr = transcript_path(sess["value"])
-            since = active_since(sess["value"], tr)
+            sid = pane_session(p["pane_id"], procs) or (p.get("agent_session") or {}).get("value")
+            if not sid:
+                continue
+            tr = transcript_path(sid)
+            since = active_since(sid, tr)
             rows.append(
                 {
                     "pane_id": p["pane_id"],
@@ -139,7 +142,7 @@ def live_sessions() -> list[dict]:
                     "label": ws["label"],
                     "workspace_panes": ws["pane_count"],
                     "cwd": p.get("cwd"),
-                    "session_id": sess["value"],
+                    "session_id": sid,
                     "status": p.get("agent_status"),
                     "focused": bool(p.get("focused")),
                     "transcript": str(tr) if tr else None,
@@ -148,6 +151,21 @@ def live_sessions() -> list[dict]:
                 }
             )
     return rows
+
+
+def pane_session(pane_id: str, procs: dict[int, dict]) -> str | None:
+    """The session of the interactive Claude in the pane's foreground. herdr's agent_session can
+    name the wrong one: its hook also runs inside background sessions and forks, which Claude's
+    daemon starts from pre-spawned spares carrying another pane's HERDR_PANE_ID."""
+    try:
+        info = herdr("pane", "process-info", "--pane", pane_id)["process_info"]
+    except (RuntimeError, KeyError, ValueError):
+        return None
+    for fp in info.get("foreground_processes", []):
+        d = procs.get(fp.get("pid"))
+        if d and d.get("kind", "interactive") == "interactive":
+            return d.get("sessionId")
+    return None
 
 
 class HerdrDown(RuntimeError):
@@ -185,52 +203,41 @@ def claude_processes() -> list[dict]:
                 pid = int(d["pid"])
             except (ValueError, KeyError, TypeError, OSError):
                 continue
-            if pid != os.getpid() and _alive(pid):
+            if pid != os.getpid() and _same_claude(pid, d.get("procStart")):
                 procs.append(d)
     return procs
 
 
-def _alive(pid: int) -> bool:
+def _same_claude(pid: int, proc_start: str | None) -> bool:
+    """Is `pid` still the Claude that wrote its sessions file? The files are removed on a clean
+    exit, but a crash or reboot leaves stale ones, and the pid may now be anything. On Linux the
+    file's procStart is the process start time in /proc/<pid>/stat; elsewhere, check the name."""
     try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
+        if sys.platform.startswith("linux"):
+            stat = Path(f"/proc/{pid}/stat").read_text()
+            start = stat[stat.rindex(")") + 2:].split()[19]
+            return proc_start is None or start == str(proc_start)
+        out = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True, timeout=5)
+        return "claude" in out.stdout
+    except (OSError, IndexError, subprocess.SubprocessError):
         return False
-    except PermissionError:
-        return True
-    return True
-
-
-def process_env(pid: int) -> dict:
-    """Environment of a process we own: /proc on Linux, `ps -E` on macOS."""
-    try:
-        if sys.platform == "darwin":
-            out = subprocess.run(["ps", "-E", "-ww", "-o", "command=", "-p", str(pid)],
-                                 capture_output=True, text=True, timeout=5).stdout
-            return dict(w.split("=", 1) for w in out.split() if "=" in w and w.split("=", 1)[0].isupper())
-        raw = Path(f"/proc/{pid}/environ").read_bytes()
-        return dict(kv.split("=", 1) for kv in raw.decode(errors="replace").split("\0") if "=" in kv)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return {}
 
 
 def session_owners(session_id: str) -> list[int]:
     return [int(d["pid"]) for d in claude_processes() if d.get("sessionId") == session_id]
 
 
-def kill_strays(session_id: str, pane_id: str) -> list[int]:
-    """SIGTERM every Claude process still holding the session or the pane after it closed.
-    Forks and background agents inherit HERDR_PANE_ID, herdr may even report a fork's session
-    as the pane's, and closing the pane does not reach them: left alive, resuming the session
-    later would start a second writer on the same transcript."""
+def kill_strays(session_id: str) -> list[int]:
+    """SIGTERM any Claude process still holding the parked session after its pane closed, so
+    resuming it later never starts a second writer on the same transcript. Forks and background
+    agents are sessions of their own (their own id) and are left alone."""
     killed = []
-    for d in claude_processes():
-        pid = int(d["pid"])
-        if d.get("sessionId") == session_id or process_env(pid).get("HERDR_PANE_ID") == pane_id:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                killed.append(pid)
-            except (ProcessLookupError, PermissionError):
-                pass
+    for pid in session_owners(session_id):
+        try:
+            os.kill(pid, signal.SIGTERM)
+            killed.append(pid)
+        except (ProcessLookupError, PermissionError):
+            pass
     return killed
 
 
@@ -428,7 +435,7 @@ def park(pane_id: str, reason: str) -> dict:
     # The card is written BEFORE closing: if something fails afterwards, the context is not lost.
     card = write_card(live["session_id"], display_label(live), live["cwd"], reason)
     close_pane(live)
-    strays = kill_strays(live["session_id"], pane_id)
+    strays = kill_strays(live["session_id"])
     log(f"parked {card['session_id']} ({card['label']}, {reason}, idle {live['idle_days']} d)"
         + (f", stopped stray claude {strays}" if strays else ""))
     return card
