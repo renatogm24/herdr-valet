@@ -143,6 +143,7 @@ def live_sessions() -> list[dict]:
                     "workspace_panes": ws["pane_count"],
                     "cwd": p.get("cwd"),
                     "session_id": sid,
+                    "title": last_title(tr) if tr else "",
                     "status": p.get("agent_status"),
                     "focused": bool(p.get("focused")),
                     "transcript": str(tr) if tr else None,
@@ -268,6 +269,22 @@ def last_activity(p: Path) -> datetime:
         if ts:
             return datetime.fromisoformat(ts.replace("Z", "+00:00"))
     return datetime.fromtimestamp(p.stat().st_mtime, timezone.utc)
+
+
+def last_title(p: Path) -> str:
+    """The conversation title Claude Code keeps in the transcript ({"type": "ai-title",
+    "aiTitle": ...}, rewritten as the talk moves on; the last one is current). Two sessions in
+    the same directory are otherwise indistinguishable on the page."""
+    for line in reversed(_tail(p)):
+        if '"ai-title"' not in line:
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("type") == "ai-title" and d.get("aiTitle"):
+            return d["aiTitle"].strip()
+    return ""
 
 
 def last_model(p: Path) -> str:
