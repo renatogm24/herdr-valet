@@ -75,7 +75,7 @@
   .open { display: flex; align-items: center; gap: calc(var(--u) * 1.25); background: var(--panel); border: 1px solid var(--rule);
     border-radius: 8px; padding: 6px 6px 6px 12px; min-height: 42px; min-width: 0; max-width: 100%; }
   .open .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line); flex: none; }
-  .open .nm { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22ch; }
+  .open .nm { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 34ch; }
   .open .fd { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 20ch; }
   .open .st { font-size: 0.78rem; color: var(--muted); white-space: nowrap; padding-right: 6px; }
   .open .st.working { color: var(--ok); font-weight: 600; }
@@ -285,8 +285,10 @@ function renderLive() {
     el.style.setProperty("--line", lineColor(project(s.label)));
     const working = s.status === "working" || s.status === "blocked";
     const idle = s.idle_days == null ? "idle" : s.idle_days < 1 ? "idle today" : `idle ${Math.floor(s.idle_days)}d`;
-    el.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="nm">${esc(s.label)}</span>
-      <span class="fd">${esc((s.cwd || "").split("/").pop())}</span>
+    // The conversation title leads: two sessions in one directory share the label and folder.
+    const folder = (s.cwd || "").split("/").pop();
+    el.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="nm" title="${esc(s.title || s.label)}">${esc(s.title || s.label)}</span>
+      <span class="fd">${esc(s.title ? s.label : folder)}</span>
       <span class="st ${working ? "working" : ""}">${working ? (s.status === "blocked" ? "waiting" : "working") : idle}</span>
       ${working ? "" : `<button class="btn small">Park</button>`}<span class="note"></span>`;
     const btn = el.querySelector("button"), note = el.querySelector(".note");
