@@ -23,6 +23,7 @@ import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import valet  # noqa: E402
@@ -112,6 +113,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(404, {"error": "not found"})
             return
         action, target = m.groups()
+        # The page sends ids URL-encoded: a pane id arrives as w1%3Ap1.
+        target = unquote(target)
         try:
             if action == "park":
                 if not PANE_RE.match(target):
