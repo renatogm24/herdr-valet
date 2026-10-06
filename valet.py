@@ -448,7 +448,9 @@ def write_card(session_id: str, label: str, cwd: str | None, reason: str) -> dic
 def park(pane_id: str, reason: str) -> dict:
     live = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
     if live is None:
-        raise SystemExit(f"no Claude session in pane {pane_id}")
+        # ValueError and not SystemExit: the page reports it as a 400 instead of dropping the
+        # connection.
+        raise ValueError(f"no Claude session in pane {pane_id}")
     # The card is written BEFORE closing: if something fails afterwards, the context is not lost.
     card = write_card(live["session_id"], display_label(live), live["cwd"], reason)
     close_pane(live)
@@ -621,7 +623,11 @@ def main() -> int:
         for s in [] if args.json else rows:
             print(f"{s['pane_id']:<8} {s['label']:<22} {s['status']:<8} {s['idle_days'] or 0:6.1f} d  {s['session_id']}")
     elif args.cmd == "park":
-        print(json.dumps(park(args.pane_id, "manual"), ensure_ascii=False, indent=2))
+        try:
+            print(json.dumps(park(args.pane_id, "manual"), ensure_ascii=False, indent=2))
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
     elif args.cmd == "auto":
         rows = auto(args.days, args.dry_run)
         verb = "would park" if args.dry_run else "parked"
