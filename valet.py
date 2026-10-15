@@ -1094,16 +1094,37 @@ REDACT = [
     ),
     (re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*"), lambda m: f"{m[1]}{_R}"),
     (re.compile(r"([?&](?:key|token|secret|auth|api_key|apikey|access_token)=)[^&\s\"'`]+", re.I), lambda m: f"{m[1]}{_R}"),
-    # long loose hex or base64 (internal service keys)
-    (re.compile(r"\b[a-f0-9]{32,}\b", re.I), _R),
-    (re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])"), _R),
 ]
+
+# Long loose hex or base64 (internal service keys), only OUTSIDE URLs: inside one they are Slack ids,
+# commit SHAs, wiki paths; what is secret in a URL the patterns above already catch.
+_URL = re.compile(r"\bhttps?://[^\s<>\"'`)\]]+")
+_HEX = re.compile(r"\b[a-f0-9]{32,}\b", re.I)
+_B64 = re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])")
+
+
+def _b64(m: re.Match) -> str:
+    s = m[0]
+    # A run with a lowercase-word segment (src/main/java/com/...) is a path, not a key.
+    looks_like_key = (
+        re.search(r"[0-9]", s) and re.search(r"[A-Z]", s) and re.search(r"[a-z]", s)
+        and not any(re.fullmatch(r"[a-z]{3,}", seg) for seg in s.split("/"))
+    )
+    return _R if looks_like_key else s
+
+
+def _redact_loose(text: str) -> str:
+    return _B64.sub(_b64, _HEX.sub(_R, text))
 
 
 def redact(text: str) -> str:
     for rx, rep in REDACT:
         text = rx.sub(rep, text)
-    return text
+    out, last = [], 0
+    for m in _URL.finditer(text):
+        out += [_redact_loose(text[last:m.start()]), m[0]]
+        last = m.end()
+    return "".join(out) + _redact_loose(text[last:])
 
 
 def _redact_meta(meta: dict) -> dict:
