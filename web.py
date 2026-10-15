@@ -23,7 +23,7 @@ import sys
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import valet  # noqa: E402
@@ -32,6 +32,7 @@ USER = pwd.getpwuid(os.getuid()).pw_name
 PORT = int(os.environ.get("HERDR_VALET_PORT") or valet.CONF["port"])
 SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
+PANE_ACTIONS = ("park", "recap", "switch")
 PAGE = Path(__file__).resolve().parent / "web.html"
 # Only requests with a loopback Host are served. Without this, DNS rebinding lets a page from
 # another site become "same origin" with this one, read the summaries and send actions with
@@ -39,11 +40,28 @@ PAGE = Path(__file__).resolve().parent / "web.html"
 ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}", f"[::1]:{PORT}"}
 
 
+def _stats(transcript) -> dict | None:
+    try:
+        return valet.stats(Path(transcript)) if transcript else None
+    except OSError:
+        return None
+
+
 def state() -> dict:
     try:
         live, herdr_error = valet.live_sessions(), None
     except Exception as e:  # noqa: BLE001 — without herdr the page still shows the cards
         live, herdr_error = [], str(e)
+    for s in live:
+        tr = Path(s["transcript"]) if s["transcript"] else None
+        s["stats"] = _stats(tr)
+        s["recap"] = valet.recap_of(s["session_id"], tr)
+        s["profile"] = valet.profile_of(s["session_id"])
+    parked = valet.cards()
+    for c in parked:
+        # Cards from before stats were recorded: read them from the transcript.
+        c["stats"] = c.get("stats") or _stats(valet.transcript_path(c["session_id"]))
+        c["profile"] = c.get("profile") or valet.profile_of(c["session_id"])
     history = []
     if valet.HISTORY.is_dir():
         # resumed_at comes from the card; cards moved before it was recorded fall back to the
@@ -59,7 +77,8 @@ def state() -> dict:
         "user": USER,
         "idle_days": valet.CONF["idle_days"],
         "herdr_running": valet.herdr_running(),
-        "parked": valet.cards(),
+        "parked": parked,
+        "profiles": valet.profiles(),
         "live": live,
         "history": history,
         "herdr_error": herdr_error,
@@ -108,19 +127,27 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("X-Parking") != "1":
             self._json(HTTPStatus.FORBIDDEN, {"error": "missing X-Parking"})
             return
-        m = re.fullmatch(r"/api/(resume|delete|park)/([^/]+)", self.path)
+        url = urlsplit(self.path)
+        m = re.fullmatch(r"/api/(resume|delete|park|recap|switch)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
         action, target = m.groups()
         # The page sends ids URL-encoded: a pane id arrives as w1%3Ap1.
         target = unquote(target)
+        profile = (parse_qs(url.query).get("as") or [None])[0]
         try:
-            if action == "park":
+            if action in PANE_ACTIONS:
                 if not PANE_RE.match(target):
                     raise ValueError("invalid pane")
-                card = valet.park(target, "manual")
-                self._json(200, {"ok": True, "card": card})
+                if action == "park":
+                    self._json(200, {"ok": True, "card": valet.park(target, "manual")})
+                elif action == "recap":
+                    self._json(200, {"ok": True, "recap": valet.recap(target)})
+                else:
+                    if not profile:
+                        raise ValueError("switch needs ?as=<profile>")
+                    self._json(200, {"ok": True, "workspace": valet.switch(target, profile)})
                 return
             if not SESSION_RE.match(target) or not valet.card_path(target).exists():
                 raise ValueError("no card for that session")
@@ -129,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                 valet.log(f"deleted {target} (web)")
                 self._json(200, {"ok": True})
             else:
-                ws = valet.resume_in_herdr(target)
+                ws = valet.resume_in_herdr(target, profile)
                 self._json(200, {"ok": True, "workspace": ws})
         except valet.HerdrDown as e:
             self._json(

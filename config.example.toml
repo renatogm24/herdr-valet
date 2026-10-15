@@ -4,8 +4,8 @@
 # Days idle before the timer parks a session on its own.
 # idle_days = 3
 
-# How to resume, inside a new herdr pane and in the card's directory.
-# {session_id}, {cwd} and {model} are substituted, already shell-quoted. If the session belonged
+# How to resume, in the card's directory: in a new tab of the project's workspace if one is open.
+# {session_id}, {cwd}, {model} and {profile} are substituted, already shell-quoted. If the session belonged
 # to another account (CLAUDE_CONFIG_DIR), that is prepended automatically.
 # Examples: "claude --resume {session_id} --model {model}", or your own launcher that sets
 # secrets or flags: "my-launcher resume {session_id}".
@@ -24,3 +24,18 @@
 
 # Where cards live.
 # data_dir = "~/.local/share/herdr-valet"
+
+# Profiles: the ways you launch Claude (accounts, a proxy, wrappers). profile_command prints the
+# one a session runs with ({session_id} substituted); profiles lists the ones the page offers to
+# resume or switch to, "name" or "name:Label". resume_command gets the choice as {profile}.
+# profile_command = "my-launcher which {session_id}"
+# profiles = "work:Work API,personal:Subscription"
+# resume_command = "my-launcher resume --as {profile} {session_id}"
+
+# Context window the gauge measures against (a session seen above it counts as 1M).
+# context_window = 200000
+
+# Alerts on sessions: context use (%), compactions, estimated cost in USD (list prices).
+# alert_context_pct = 80
+# alert_compactions = 3
+# alert_cost_usd = 25

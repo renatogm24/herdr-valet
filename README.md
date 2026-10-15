@@ -15,14 +15,20 @@ herdr-valet:
    session that did not come back gets its card ("cut off by a reboot").
 4. **Web page** (`127.0.0.1:8790`): parked sessions with their summary and a **Resume in herdr**
    button, open sessions with **Park**, and recently resumed ones. Works from a phone.
+5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
+   included), with alerts past a threshold, and a **Recap** of what each one is doing without
+   closing it (parking right after reuses it).
+6. **Profiles (optional):** if you launch Claude in more than one way (two accounts, a proxy, a
+   wrapper), each session shows which one it runs with, and can be resumed, or switched while
+   open, with another.
 
-Resume opens a herdr workspace with `claude --resume <id>`: the whole conversation comes back;
-the card is just the index.
+Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
+a new workspace otherwise: the whole conversation comes back; the card is just the index.
 
 ## Requirements
 
 - herdr with the Claude integration (`herdr integration status` shows `claude: current`): that
-  is where each pane's session id comes from. Developed against herdr 0.7.1.
+  is where each pane's session id comes from. Developed against herdr 0.9.3 (tabs).
 - Claude Code (`claude` on PATH).
 - Python 3.9 or newer, standard library only. Linux (systemd) or macOS (launchd).
 
@@ -39,7 +45,8 @@ command; cards and config stay.
 ## Use
 
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
-- CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id>`,
+- CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
+  `switch <pane_id> --as PROFILE`, `recap <pane_id>`, `stats <session_id>`,
   `auto --dry-run` (what it would park), `config`.
 
 ## Configuration
@@ -49,6 +56,11 @@ useful key is `resume_command`: if you launch Claude through a wrapper (MCP secr
 another account), put it there so the session comes back the way it was opened.
 `summary_command` does the same for summaries: if a session belonged to a work account, its
 summary should not go out through your personal one.
+
+`profile_command` prints which profile a session runs with and `profiles` lists the ones to
+offer; `resume_command` gets the chosen one as `{profile}`. Costs are estimates at Anthropic list
+prices: through a proxy or a cloud provider the bill can differ, and on a subscription they are
+what the session would have cost.
 
 ## Security
 
