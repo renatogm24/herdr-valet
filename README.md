@@ -27,6 +27,10 @@ herdr-valet:
    the session (a skill or command of yours writes the handoff first), opens a tab next to it
    where Claude starts on that file with the same model, waits until it is up, and only then
    parks the old one. The two cards point at each other (`continued_in` / `continued_from`).
+8. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
+   since the last run: each conversation entry (user and assistant text, by `uuid`), cards and
+   recaps. No LLM on the machine; whoever receives it summarizes. Sessions in a herdr tab named
+   `knowledge-…` send everything, tool calls and results included. Secrets are masked first.
 
 Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
 a new workspace otherwise: the whole conversation comes back; the card is just the index.
@@ -53,7 +57,7 @@ command; cards and config stay.
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
 - CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
   `switch <pane_id> --as PROFILE`, `recap <pane_id>`, `stats <session_id>`,
-  `auto --dry-run` (what it would park), `config`.
+  `auto --dry-run` (what it would park), `sync [--dry-run]`, `config`.
 
 ## Configuration
 
@@ -77,6 +81,15 @@ To reach it from another device, put a proxy **with authentication** in front th
 `proxy_pass http://127.0.0.1:<port>/`): the page can resume and close sessions on your machine.
 
 The summary runs with no tools (`--tools ""`): the transcript is untrusted input.
+
+`sync` sends conversation text off the machine: point `sync_url` only at a receiver you
+control, over a network you trust (or TLS). Masking covers common token formats (Anthropic,
+GitHub, Slack, AWS, Atlassian, JWTs, `KEY=value`, credentials in URLs, long hex/base64), not
+everything: treat it as a second line, not the only one. The Bearer token lives in its own file
+(`sync_token_file`, chmod 600), not in the config. Payload, per event: `source`, `source_id`
+(`<session_id>/<uuid>`), `kind` (`session`, `session_knowledge`, `card`, `recap`), `ts`, `ref`
+(the session id), `role`, `text`, `title`, `meta` (cwd, branch, tab, label). Answer 200 to
+advance; a 400 is logged and skipped; anything else is retried on the next run.
 
 ## Limitations
 
