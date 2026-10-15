@@ -146,9 +146,11 @@ def live_sessions() -> list[dict]:
     rows = []
     procs = {int(d["pid"]): d for d in claude_processes()}
     for ws in herdr("workspace", "list")["workspaces"]:
+        tabs = {t["tab_id"]: t for t in herdr("tab", "list", "--workspace", ws["workspace_id"])["tabs"]}
         for p in herdr("pane", "list", "--workspace", ws["workspace_id"])["panes"]:
             if p.get("agent") != "claude":
                 continue
+            tab = tabs.get(p.get("tab_id")) or {}
             sid = pane_session(p["pane_id"], procs) or (p.get("agent_session") or {}).get("value")
             if not sid:
                 continue
@@ -160,6 +162,10 @@ def live_sessions() -> list[dict]:
                     "workspace_id": ws["workspace_id"],
                     "label": ws["label"],
                     "workspace_panes": ws["pane_count"],
+                    # Where it sits in herdr's sidebar: workspace and tab, as the user named them.
+                    "workspace_number": ws.get("number"),
+                    "tab_number": tab.get("number"),
+                    "tab": tab_name(tab.get("label")),
                     "cwd": p.get("cwd"),
                     "session_id": sid,
                     "title": last_title(tr) if tr else "",
@@ -434,10 +440,18 @@ def log(msg: str) -> None:
 
 
 # --------------------------------------------------------------------------- parking
+def tab_name(label: str | None) -> str | None:
+    """A tab's label, unless it is herdr's default (its number): then it names nothing."""
+    return label if label and not label.isdigit() else None
+
+
 def display_label(live: dict) -> str:
-    # In a workspace with several panes the name alone is ambiguous: add the directory.
+    """workspace/tab as named in herdr. Without a tab name, in a workspace with several panes the
+    workspace alone is ambiguous: add the directory. Resume reopens the tab under the same name."""
     label = live["label"]
-    if live["workspace_panes"] > 1 and live["cwd"]:
+    if live.get("tab"):
+        label = f"{label}/{live['tab']}"
+    elif live["workspace_panes"] > 1 and live["cwd"]:
         label = f"{label}/{Path(live['cwd']).name}"
     return label
 

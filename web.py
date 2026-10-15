@@ -53,6 +53,7 @@ def state() -> dict:
     except Exception as e:  # noqa: BLE001 — without herdr the page still shows the cards
         live, herdr_error = [], str(e)
     for s in live:
+        s["place"] = valet.display_label(s)
         tr = Path(s["transcript"]) if s["transcript"] else None
         s["stats"] = _stats(tr)
         s["recap"] = valet.recap_of(s["session_id"], tr)
