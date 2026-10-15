@@ -32,7 +32,10 @@
 # profiles = "work:Work API,personal:Subscription"
 # resume_command = "my-launcher resume --as {profile} {session_id}"
 
-# Context window the gauge measures against (a session seen above it counts as 1M).
+# Context window the gauge measures against, per model ("model:tokens", comma-separated; a model
+# requested as "...[1m]" counts as 1M). Other models use context_window, and a session seen above
+# it counts as 1M.
+# context_windows = "claude-opus-5-5:1000000"
 # context_window = 200000
 
 # Alerts on sessions: context use (%), compactions, estimated cost in USD (list prices).
