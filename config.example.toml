@@ -51,3 +51,12 @@
 
 # Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
 # closed_keep_days = 7
+
+# `sync`, run by the timer before parking: POST new conversation entries, cards and recaps as JSON
+# to a webhook you control. Empty sync_url = off. The Bearer token goes in sync_token_file
+# (chmod 600), not here. Tabs named sync_knowledge_prefix… also send tool calls and results.
+# sync_url = "http://192.168.1.10:3121/ingest"
+# sync_token_file = "~/.config/herdr-valet/sync-token"
+# sync_host = "<short hostname>"
+# sync_knowledge_prefix = "knowledge-"
+# sync_backfill_days = 7

@@ -22,6 +22,8 @@ the full history; the card is just the index.
                                      a new tab next to it starts Claude on the handoff file, then
                                      the old one is parked (pane from $HERDR_PANE_ID by default)
     valet.py recap <pane_id>         summarize an open session without closing it
+    valet.py sync [--dry-run]        send new conversation entries, cards and recaps to sync_url
+                                     (auto runs it first; off while sync_url is empty)
     valet.py stats <session_id>      context, compactions and estimated cost of a session
     valet.py delete <session_id>     delete the card (Claude keeps the conversation)
     valet.py config                  the effective configuration
@@ -39,11 +41,15 @@ import argparse
 import glob
 import json
 import os
+import re
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -89,6 +95,17 @@ DEFAULTS = {
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
     # after this many days.
     "closed_keep_days": 7.0,
+    # `sync` (run by `auto`): POST new conversation entries, cards and recaps to a webhook as JSON.
+    # Empty sync_url = off. The token file holds the Bearer token (keep it chmod 600).
+    "sync_url": "",
+    "sync_token_file": str(
+        Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "herdr-valet/sync-token"
+    ),
+    "sync_host": socket.gethostname().split(".")[0],
+    # Sessions whose herdr tab starts with this send everything, tool calls and results included.
+    "sync_knowledge_prefix": "knowledge-",
+    # On the first run, only conversations that moved in the last N days are sent.
+    "sync_backfill_days": 7.0,
 }
 
 
@@ -627,6 +644,12 @@ def auto(days: float, dry_run: bool) -> list[dict]:
     done = []
     # Without herdr there is nothing to park: the timer still fires every 10 min and should not
     # leave an error in the log each time.
+    if not dry_run:
+        # Sync first and on its own: it works without herdr, and a failure must not stop parking.
+        try:
+            sync()
+        except Exception as e:  # noqa: BLE001
+            log(f"sync failed: {e}")
     if not herdr_running():
         return done
     if not dry_run:
@@ -1032,6 +1055,269 @@ def title(c: dict) -> str:
     return ""
 
 
+# --------------------------------------------------------------------------- sync
+# Push what happens in Claude to a webhook as it happens: each new transcript entry since the last
+# run (user and assistant text), plus cards and recaps. No LLM on this machine: whoever receives it
+# summarizes. Sessions whose herdr tab starts with sync_knowledge_prefix send everything, tool calls
+# and their results included. Secrets are masked before anything leaves.
+#
+# The transcript is the outbox: the byte offset per session only moves after a 200, so a machine
+# that sleeps or loses the network sends the backlog on the next run. Each event carries the entry's
+# uuid, so sending something twice is harmless if the receiver deduplicates.
+SYNC_DIR = DATA / "sync"
+SYNC_STATE = SYNC_DIR / "state.json"
+SYNC_MAX_EVENTS = 500
+SYNC_MAX_BYTES = 8_000_000
+SYNC_MAX_TEXT = 1_000_000
+
+_R = "[REDACTED]"
+REDACT = [
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"), _R),
+    (re.compile(r"\bsk-ant-[A-Za-z0-9_-]{10,}"), _R),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{20,}"), _R),
+    (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"), _R),
+    (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"), _R),
+    (re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}"), _R),
+    (re.compile(r"\b(AKIA|ASIA)[0-9A-Z]{16}\b"), _R),
+    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"), _R),
+    (re.compile(r"\bATATT[A-Za-z0-9_=-]{20,}"), _R),
+    # user:password in URLs
+    (re.compile(r"\b([a-z][a-z0-9+.-]*://)([^\s:/@]+):([^\s@/]+)@", re.I), lambda m: f"{m[1]}{_R}@"),
+    # KEY=value, "token": "value", password: value
+    (
+        re.compile(
+            r"\b([A-Za-z0-9_.-]*(?:key|token|secret|passw(?:or)?d|pwd|auth|credential)[A-Za-z0-9_.-]*)"
+            r"([\"']?\s*[:=]\s*[\"']?)([^\s\"',;`}]{8,})",
+            re.I,
+        ),
+        lambda m: f"{m[1]}{m[2]}{_R}",
+    ),
+    (re.compile(r"\b(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*"), lambda m: f"{m[1]}{_R}"),
+    (re.compile(r"([?&](?:key|token|secret|auth|api_key|apikey|access_token)=)[^&\s\"'`]+", re.I), lambda m: f"{m[1]}{_R}"),
+    # long loose hex or base64 (internal service keys)
+    (re.compile(r"\b[a-f0-9]{32,}\b", re.I), _R),
+    (re.compile(r"\b[A-Za-z0-9+/]{40,}={0,2}(?![A-Za-z0-9+/=])"), _R),
+]
+
+
+def redact(text: str) -> str:
+    for rx, rep in REDACT:
+        text = rx.sub(rep, text)
+    return text
+
+
+def _redact_meta(meta: dict) -> dict:
+    return {k: redact(v) if isinstance(v, str) else v for k, v in meta.items() if v not in (None, "")}
+
+
+def sync_token() -> str:
+    try:
+        return Path(CONF["sync_token_file"]).expanduser().read_text().strip()
+    except OSError:
+        return ""
+
+
+def _sync_state() -> dict:
+    try:
+        return json.loads(SYNC_STATE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_sync_state(state: dict) -> None:
+    SYNC_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = SYNC_STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, ensure_ascii=False, indent=1))
+    tmp.replace(SYNC_STATE)
+
+
+def entry_events(d: dict, session_id: str, knowledge: bool) -> list[dict]:
+    """The events one transcript entry yields: its text, and with `knowledge` its tool calls and
+    results too. Sidechains (subagents), meta entries and system reminders are not conversation."""
+    if d.get("type") not in ("user", "assistant") or d.get("isSidechain") or d.get("isMeta"):
+        return []
+    uuid, ts = d.get("uuid"), d.get("timestamp")
+    if not uuid or not ts:
+        return []
+    content = (d.get("message") or {}).get("content")
+    parts: list[tuple[str, str]] = []
+    text = _text(content).strip()
+    if text and not text.startswith(("<system-reminder>", "<command-", "<local-command")):
+        parts.append((d["type"], text))
+    if knowledge and isinstance(content, list):
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "tool_use":
+                parts.append(("tool", f"{b.get('name')} {json.dumps(b.get('input'), ensure_ascii=False)}"))
+            elif b.get("type") == "tool_result":
+                parts.append(("tool", _text(b.get("content")).strip()))
+    meta = {"session_id": session_id, "cwd": d.get("cwd"), "branch": d.get("gitBranch")}
+    return [
+        {
+            "source": "claude",
+            "source_id": f"{session_id}/{uuid}" + (f"/{i}" if i else ""),
+            "kind": "session_knowledge" if knowledge else "session",
+            "ts": ts,
+            "ref": session_id,
+            "role": role,
+            "text": redact(t)[:SYNC_MAX_TEXT],
+            "meta": _redact_meta(meta),
+        }
+        for i, (role, t) in enumerate(parts)
+        if t
+    ]
+
+
+def _card_event(c: dict, kind: str, at: str) -> dict:
+    meta = {k: c.get(k) for k in ("label", "cwd", "branch", "model", "reason", "profile")}
+    e = {
+        "source": "valet",
+        "source_id": f"{kind}/{c['session_id']}/{at}",
+        "kind": kind,
+        "ts": at,
+        "ref": c["session_id"],
+        "text": redact(c.get("summary") or ""),
+        "meta": _redact_meta({**meta, "session_id": c["session_id"]}),
+    }
+    t = redact(title(c))[:500]
+    if t:
+        e["title"] = t
+    return e
+
+
+def _post(events: list[dict]) -> int:
+    body = json.dumps({"agent": "valet", "host": CONF["sync_host"], "events": events}, ensure_ascii=False).encode()
+    req = urllib.request.Request(
+        CONF["sync_url"], data=body, method="POST",
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {sync_token()}"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        log(f"sync: HTTP {e.code} {e.read()[:300]!r}")
+        return e.code
+
+
+def _send(events: list[dict]) -> bool:
+    """POST in chunks. True when every chunk got a 200, or a 400: a payload the receiver rejects
+    will not become valid by sending it again, so it is logged and skipped instead of blocking."""
+    chunk: list[dict] = []
+    size = 0
+    for e in [*events, None]:
+        n = len(json.dumps(e, ensure_ascii=False)) if e else 0
+        if chunk and (e is None or len(chunk) >= SYNC_MAX_EVENTS or size + n > SYNC_MAX_BYTES):
+            status = _post(chunk)
+            if status == 400:
+                log(f"sync: {len(chunk)} events rejected (400), skipped")
+            elif status != 200:
+                return False
+            chunk, size = [], 0
+        if e:
+            chunk.append(e)
+            size += n
+    return True
+
+
+def sync(dry_run: bool = False) -> dict:
+    """Send what changed since the last run. Returns counts; never raises for network errors."""
+    if not CONF["sync_url"]:
+        return {"skipped": "sync_url not set"}
+    if not dry_run and not sync_token():
+        log(f"sync: no token in {CONF['sync_token_file']}")
+        return {"skipped": "no token"}
+    state = _sync_state()
+    # First run: backfill only what moved in the last sync_backfill_days.
+    since = state.setdefault("since", time.time() - CONF["sync_backfill_days"] * 86400)
+    sessions = state.setdefault("sessions", {})
+    live: dict[str, dict] = {}
+    if herdr_running():
+        try:
+            live = {s["session_id"]: s for s in live_sessions()}
+        except Exception as e:  # noqa: BLE001 — sync what is on disk anyway
+            log(f"sync: herdr not responding: {e}")
+    prefix = CONF["sync_knowledge_prefix"]
+    out = {"sessions": 0, "events": 0, "cards": 0, "failed": False}
+
+    for base in CONFIG_DIRS:
+        for tr in sorted((base / "projects").glob("*/*.jsonl")):
+            sid = tr.stem
+            st = sessions.get(sid, {})
+            size, mtime = tr.stat().st_size, tr.stat().st_mtime
+            if not st and mtime < since:
+                continue
+            lv = live.get(sid)
+            if lv:
+                st["label"] = display_label(lv)
+                # Became a knowledge session (tab renamed): resend from the start with the tools.
+                if prefix and (lv.get("tab") or "").startswith(prefix) and not st.get("knowledge"):
+                    st["knowledge"], st["offset"] = True, 0
+            offset = st.get("offset", 0)
+            if size < offset:  # rewritten: start over, the receiver deduplicates
+                offset = 0
+            if size == offset:
+                sessions[sid] = st
+                continue
+            with tr.open("rb") as f:
+                f.seek(offset)
+                data = f.read()
+            data = data[: data.rfind(b"\n") + 1]  # only complete lines; the rest goes next run
+            if not data:
+                continue
+            events = []
+            for line in data.decode(errors="replace").splitlines():
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                for e in entry_events(d, sid, bool(st.get("knowledge"))):
+                    if st.get("label"):
+                        e["meta"]["label"] = st["label"]
+                    if lv and lv.get("tab"):
+                        e["meta"]["tab"] = lv["tab"]
+                    events.append(e)
+            if events and not dry_run and not _send(events):
+                out["failed"] = True
+                break
+            st["offset"] = offset + len(data)
+            sessions[sid] = st
+            out["sessions"] += bool(events)
+            out["events"] += len(events)
+        if out["failed"]:
+            break
+
+    if not out["failed"]:
+        # Cards (open, resumed) and recaps, each once per version.
+        sent = set(state.get("cards", []))
+        pending, seen = [], set()
+        rows = [(c, "card", c.get("parked_at")) for c in cards()]
+        if HISTORY.is_dir():
+            rows += [(json.loads(p.read_text()), "card", None) for p in HISTORY.glob("*.json")]
+        if RECAPS.is_dir():
+            rows += [(json.loads(p.read_text()), "recap", None) for p in RECAPS.glob("*.json")]
+        for c, kind, at in rows:
+            at = at or c.get("parked_at") or c.get("at")
+            if not c.get("session_id") or not at:
+                continue
+            key = f"{kind}/{c['session_id']}/{at}"
+            seen.add(key)
+            if key not in sent:
+                pending.append(_card_event(c, kind, at))
+        if pending and (dry_run or _send(pending)):
+            out["cards"] = len(pending)
+            sent |= {f"{e['kind']}/{e['ref']}/{e['ts']}" for e in pending}
+        elif pending:
+            out["failed"] = True
+        state["cards"] = sorted(sent & seen)
+
+    if not dry_run:
+        _save_sync_state(state)
+    if out["events"] or out["cards"] or out["failed"]:
+        log(f"sync: {out}")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1058,6 +1344,7 @@ def main() -> int:
     co.add_argument("--from", dest="pane_id")
     co.add_argument("--keep", action="store_true", help="leave the old session open")
     sub.add_parser("recap").add_argument("pane_id")
+    sub.add_parser("sync").add_argument("--dry-run", action="store_true")
     sub.add_parser("config")
     args = ap.parse_args()
 
@@ -1119,6 +1406,11 @@ def main() -> int:
             print(recap(args.pane_id)["summary"])
         except ValueError as e:
             print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "sync":
+        r = sync(args.dry_run)
+        print(json.dumps(r))
+        if r.get("failed"):
             return 1
     elif args.cmd == "stats":
         tr = transcript_path(args.session_id)
