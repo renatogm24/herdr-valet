@@ -124,6 +124,8 @@ HISTORY = DATA / "history"
 # and whatever was not parked would be on no list. The snapshot carries the boot id: if the boot
 # differs when it is read, whatever did not come back was lost to the reboot, not closed by hand.
 SNAPSHOT = DATA / "open-sessions.json"
+# Which session continued which: {new_session_id: {"from": old_session_id, "handoff": path}}.
+CHAINS = DATA / "chains.json"
 LOG = DATA / "valet.log"
 # Summaries of open sessions, asked for from the page: data_dir/recaps/<session_id>.json.
 RECAPS = DATA / "recaps"
@@ -457,7 +459,8 @@ def card_path(session_id: str) -> Path:
 
 
 def cards() -> list[dict]:
-    rows = [json.loads(p.read_text()) for p in DATA.glob("*.json") if p != SNAPSHOT]
+    # Cards are <session_id>.json; the data dir also holds the snapshot and the chains.
+    rows = [json.loads(p.read_text()) for p in DATA.glob("*.json") if p not in (SNAPSHOT, CHAINS)]
     return sorted(rows, key=lambda c: c.get("parked_at", ""), reverse=True)
 
 
@@ -723,8 +726,6 @@ def switch(pane_id: str, profile: str) -> str:
 
 
 # --------------------------------------------------------------------------- continuing
-# Which session continued which: {new_session_id: {"from": old_session_id, "handoff": path}}.
-CHAINS = DATA / "chains.json"
 
 
 def chains() -> dict:
