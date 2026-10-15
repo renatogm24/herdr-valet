@@ -68,8 +68,10 @@ DEFAULTS = {
     # resume_command receives the chosen one as {profile}.
     "profile_command": "",
     "profiles": "",
-    # Context window the context gauge measures against. A session seen above it is taken to run
-    # with the 1M window.
+    # Context window the context gauge measures against, per model: "model:tokens", comma-separated,
+    # matched on the model id without its date suffix. A model requested as "...[1m]" counts as 1M.
+    # Any other model uses context_window, and a session seen above it is taken to run with 1M.
+    "context_windows": "claude-opus-5-5:1000000",
     "context_window": 200000,
     # Alerts on open and parked sessions: context use (%), compactions, estimated cost (USD).
     "alert_context_pct": 80.0,
@@ -806,6 +808,7 @@ class _FileStats:
         self.unpriced: set[str] = set()
         self.context = 0
         self.peak = 0
+        self.model = ""
         self.compactions = 0
         self.last_compaction: dict | None = None
 
@@ -838,6 +841,8 @@ class _FileStats:
         if main and not d.get("isSidechain"):
             self.context = ctx
             self.peak = max(self.peak, ctx)
+            # requestedModel keeps the "[1m]" suffix that message.model drops.
+            self.model = d.get("requestedModel") or model
         # One reply is stored as one record per content block, each with the same usage.
         mid = msg.get("id") or d.get("requestId") or d.get("uuid")
         if mid in self.seen:
@@ -872,14 +877,25 @@ def _file_stats(p: Path, main: bool) -> _FileStats:
     return st
 
 
+def context_window(model: str, peak: int) -> int:
+    """The window a session runs with: by its model, else the default (1M once a session went past it)."""
+    if model.endswith("[1m]"):
+        return 1_000_000
+    base = model.split("[")[0]
+    for entry in CONF["context_windows"].split(","):
+        name, _, size = (x.strip() for x in entry.partition(":"))
+        if name and size.isdigit() and (base == name or (base.startswith(name + "-") and base[len(name) + 1:].isdigit())):
+            return int(size)
+    window = CONF["context_window"]
+    return 1_000_000 if peak > window else window
+
+
 def stats(tr: Path) -> dict:
     """Context in use, compactions and estimated cost of a session, its subagents included, plus
     the alerts it trips."""
     main = _file_stats(tr, True)
     subs = [_file_stats(p, False) for p in sorted((tr.parent / tr.stem / "subagents").glob("*.jsonl"))]
-    window = CONF["context_window"]
-    if main.peak > window:
-        window = 1_000_000
+    window = context_window(main.model, main.peak)
     pct = round(100 * main.context / window, 1) if window else 0
     cost = round(main.cost + sum(s.cost for s in subs), 2)
     alerts = []
