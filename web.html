@@ -74,7 +74,7 @@
   .platform { display: flex; flex-direction: column; gap: 6px; }
   .open { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--line); border-radius: 8px; min-width: 0; }
   .open.alert { border-color: color-mix(in srgb, var(--warn) 45%, var(--rule)); border-left-color: var(--line); }
-  .open-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: calc(var(--u) * 1.5);
+  .open-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto auto; align-items: center; gap: calc(var(--u) * 1.5);
     padding: 6px 8px 6px 12px; min-height: 44px; }
   .open .who-s { display: flex; align-items: baseline; gap: var(--u); min-width: 0; }
   .open .place { font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex: none; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
@@ -90,8 +90,12 @@
   .open .recap .summary { border-top: 0; padding-top: 0; grid-template-columns: 140px 1fr; font-size: 0.88rem; }
   .open .recap .when { font-size: 0.75rem; color: var(--muted); margin-top: var(--u); }
   .open .recap .when.stale { color: var(--warn); }
-  .pf { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; border: 1px solid var(--rule-strong); color: var(--body);
-    border-radius: 999px; padding: 0 8px; white-space: nowrap; flex: none; }
+  /* Profile = state, shown as a solid chip in its own column, always first: where the session runs.
+     Switching is an action, so it is a button with a verb, never another chip. */
+  .pf { display: inline-block; min-width: 44px; text-align: center; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em;
+    color: #fff; background: var(--pf, var(--faint)); border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex: none; }
+  .pf.none { background: transparent; }
+  .to-pf::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pf); margin-right: 6px; }
   /* stats: context gauge · compactions · cost */
   .stats { display: flex; align-items: center; gap: calc(var(--u) * 1.25); font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
   .gauge { display: inline-flex; align-items: center; gap: 6px; }
@@ -104,7 +108,7 @@
   .alerts span { font-size: 0.75rem; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 9px; }
   .empty-line { font-size: 0.88rem; color: var(--muted); }
   @media (max-width: 860px) {
-    .open-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .open-row { grid-template-columns: auto minmax(0, 1fr) auto; }
     .open .stats { grid-column: 1 / -1; order: 3; }
     .open .acts { grid-column: 1 / -1; order: 4; justify-content: flex-start; flex-wrap: wrap; }
     .open .recap .summary { grid-template-columns: 1fr; }
@@ -290,7 +294,12 @@ function commandBox(cmd) {
 // Profiles (accounts / launchers): name -> label, and the ones a session could switch to.
 const profileLabel = (name) => ST.profiles.find((p) => p.name === name)?.label || name;
 const otherProfiles = (name) => ST.profiles.filter((p) => p.name !== name);
-const pfBadge = (name) => name ? `<span class="pf" title="Profile: ${esc(profileLabel(name))}">${esc(profileLabel(name))}</span>` : "";
+// Each profile keeps one color everywhere, by its position in the config.
+const PF_COLORS = ["#5b5f6b", "#2f5bd3", "#a0611a", "#2a8a5e"];
+const pfColor = (name) => PF_COLORS[Math.max(0, ST.profiles.findIndex((p) => p.name === name)) % PF_COLORS.length];
+const pfBadge = (name) => ST.profiles.length
+  ? (name ? `<span class="pf" style="--pf:${pfColor(name)}" title="Runs on ${esc(profileLabel(name))}">${esc(profileLabel(name))}</span>` : `<span class="pf none"></span>`)
+  : "";
 const ktok = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`;
 const money = (n) => n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
 // Context gauge · compactions · estimated cost. Cost is at Anthropic list prices: on a
@@ -362,13 +371,14 @@ function renderLive() {
     const rc = s.recap;
     const switches = working ? [] : otherProfiles(s.profile);
     el.innerHTML = `<div class="open-row">
+        ${pfBadge(s.profile)}
         <div class="who-s"><span class="place" title="${esc(`${s.label}${s.tab ? ` › tab “${s.tab}”` : ""} — ${s.cwd || ""}`)}">${esc(ws)}${tabName ? `<span class="sep">›</span><span class="tb">${esc(tabName)}</span>` : ""}</span>
-          <span class="nm" title="${esc(s.title)}">${esc(s.title || "")}</span>${pfBadge(s.profile)}</div>
+          <span class="nm" title="${esc(s.title)}">${esc(s.title || "")}</span></div>
         <div class="stats">${statsHtml(s.stats)}</div>
         <span class="st ${working ? "working" : ""}">${working ? (s.status === "blocked" ? "waiting" : "working") : idle}</span>
         <div class="acts">
           <button class="btn small" data-act="recap">${rc ? (shownRecaps.has(s.session_id) ? "Hide recap" : "Recap") : "Recap"}</button>
-          ${switches.map((p) => `<button class="btn small" data-act="switch" data-as="${esc(p.name)}" title="Park it and resume the same conversation with ${esc(p.label)}">→ ${esc(p.label)}</button>`).join("")}
+          ${switches.map((p) => `<button class="btn small to-pf" style="--pf:${pfColor(p.name)}" data-act="switch" data-as="${esc(p.name)}" title="Close it here and reopen the same conversation on ${esc(p.label)}">Move to ${esc(p.label)}</button>`).join("")}
           ${working ? "" : `<button class="btn small" data-act="park">Park</button>`}
         </div>
       </div>
@@ -398,8 +408,8 @@ function renderLive() {
         run(btn, rc && !rc.stale ? "Closing…" : "Summarizing and closing… ~15 s", `api/park/${pane}`, (r) => { selected = r.card?.session_id || selected; });
       else if (act === "switch") btn.onclick = () => {
         const label = profileLabel(btn.dataset.as);
-        if (!arm(btn, "Switch? Click again", note, `Closes this pane and reopens the same conversation with ${label}.`)) return;
-        run(btn, `Parking and reopening with ${label}… ~20 s`, `api/switch/${pane}?as=${encodeURIComponent(btn.dataset.as)}`, () => {});
+        if (!arm(btn, `Move to ${label}? Click again`, note, `Closes it here and reopens the same conversation on ${label}, in a tab of this workspace.`)) return;
+        run(btn, `Moving to ${label}… ~20 s`, `api/switch/${pane}?as=${encodeURIComponent(btn.dataset.as)}`, () => {});
       };
     }
     live.append(el);
@@ -482,7 +492,7 @@ function renderDetail() {
       <span title="Last message">Last active <b>${ago(c.last_activity || c.parked_at)}</b></span>
       ${c.branch ? `<span>Branch <b class="mono">${esc(c.branch)}</b></span>` : ""}
       <span>Model <b>${esc(c.model || "default")}</b></span>
-      ${c.profile ? `<span>Profile <b>${esc(profileLabel(c.profile))}</b></span>` : ""}
+      ${c.profile ? `<span>Runs on ${pfBadge(c.profile)}</span>` : ""}
       ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : `<span>Parked by hand</span>`}
     </div>
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
@@ -494,8 +504,8 @@ function renderDetail() {
     </dl>
     <div class="path mono" title="Directory">${esc(c.cwd)}</div>
     <div class="actions">
-      <button class="btn primary" data-act="resume">Resume in herdr<kbd>↵</kbd></button>
-      ${otherProfiles(c.profile).map((p) => `<button class="btn" data-act="resume-as" data-as="${esc(p.name)}">Resume with ${esc(p.label)}</button>`).join("")}
+      <button class="btn primary" data-act="resume">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}<kbd>↵</kbd></button>
+      ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>`;
