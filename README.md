@@ -23,6 +23,10 @@ herdr-valet:
 6. **Profiles (optional):** if you launch Claude in more than one way (two accounts, a proxy, a
    wrapper), each session shows which one it runs with, and can be resumed, or switched while
    open, with another.
+7. **Continues a long session in a fresh one:** `valet.py continue handoff.md`, run from inside
+   the session (a skill or command of yours writes the handoff first), opens a tab next to it
+   where Claude starts on that file with the same model, waits until it is up, and only then
+   parks the old one. The two cards point at each other (`continued_in` / `continued_from`).
 
 Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
 a new workspace otherwise: the whole conversation comes back; the card is just the index.
