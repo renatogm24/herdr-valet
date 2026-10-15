@@ -77,6 +77,7 @@ def state() -> dict:
     return {
         "user": USER,
         "idle_days": valet.CONF["idle_days"],
+        "closed_keep_days": valet.CONF["closed_keep_days"],
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),

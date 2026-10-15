@@ -75,6 +75,9 @@ DEFAULTS = {
     "alert_context_pct": 80.0,
     "alert_compactions": 3,
     "alert_cost_usd": 25.0,
+    # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
+    # after this many days.
+    "closed_keep_days": 7.0,
 }
 
 
@@ -502,10 +505,17 @@ def park(pane_id: str, reason: str) -> dict:
     return card
 
 
+def has_conversation(session_id: str) -> bool:
+    tr = transcript_path(session_id)
+    return bool(tr and excerpt(tr)[1])
+
+
 def snapshot() -> list[dict]:
-    """Record what is open. If the previous snapshot is from another boot, every session in it
-    that did not come back and has no card was lost to the reboot: write its card ("reboot") so
-    it shows up under Parked with its summary and Resume button."""
+    """Record what is open, and give a card to whatever left since the last snapshot without one:
+    - another boot: lost to the reboot ("reboot");
+    - same boot, its pane gone or no longer running Claude: closed by hand ("closed"). A pane
+      that now runs another session is a /clear or /resume, not a close: no card. Neither do
+      sessions with no conversation."""
     boot = boot_id()
     try:
         live = live_sessions()
@@ -514,17 +524,26 @@ def snapshot() -> list[dict]:
         return []
     prev = json.loads(SNAPSHOT.read_text()) if SNAPSHOT.exists() else {}
     recovered = []
-    if prev and prev.get("boot_id") != boot:
-        alive = {s["session_id"] for s in live}
-        for s in prev.get("sessions", []):
-            sid = s["session_id"]
-            if sid in alive or card_path(sid).exists():
+    rebooted = prev.get("boot_id") != boot
+    alive = {s["session_id"] for s in live}
+    panes = {s["pane_id"] for s in live}
+    for s in prev.get("sessions", []):
+        sid = s["session_id"]
+        if sid in alive or card_path(sid).exists():
+            continue
+        if not rebooted:
+            # Snapshots from before pane ids were recorded can't tell a close from a /clear.
+            if not s.get("pane_id") or s["pane_id"] in panes:
                 continue
-            try:
-                recovered.append(write_card(sid, s["label"], s["cwd"], "reboot"))
-                log(f"recovered after reboot {sid} ({s['label']})")
-            except Exception as e:  # noqa: BLE001
-                log(f"could not recover {sid}: {e}")
+            # Still running outside herdr (a fork, a background agent): not closed.
+            if session_owners(sid) or not has_conversation(sid):
+                continue
+        reason = "reboot" if rebooted else "closed"
+        try:
+            recovered.append(write_card(sid, s["label"], s["cwd"], reason))
+            log(f"card for {sid} ({s['label']}, {reason})")
+        except Exception as e:  # noqa: BLE001
+            log(f"could not write a card for {sid}: {e}")
     DATA.mkdir(parents=True, exist_ok=True)
     SNAPSHOT.write_text(
         json.dumps(
@@ -532,7 +551,7 @@ def snapshot() -> list[dict]:
                 "boot_id": boot,
                 "taken_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "sessions": [
-                    {"session_id": s["session_id"], "label": display_label(s), "cwd": s["cwd"]}
+                    {"session_id": s["session_id"], "pane_id": s["pane_id"], "label": display_label(s), "cwd": s["cwd"]}
                     for s in live
                 ],
             },
@@ -560,6 +579,16 @@ def close_pane(live: dict) -> None:
             pass
 
 
+def expire_closed() -> None:
+    """Cards of sessions closed by hand go after closed_keep_days: closing was most likely on
+    purpose, and Claude keeps the conversation anyway."""
+    cutoff = datetime.now(timezone.utc).timestamp() - CONF["closed_keep_days"] * 86400
+    for c in cards():
+        if c.get("reason") == "closed" and datetime.fromisoformat(c["parked_at"]).timestamp() < cutoff:
+            card_path(c["session_id"]).unlink(missing_ok=True)
+            log(f"expired closed card {c['session_id']} ({c['label']})")
+
+
 def auto(days: float, dry_run: bool) -> list[dict]:
     """Park sessions idle for more than `days` days. Never one that is working, waiting for an
     answer or focused on screen."""
@@ -570,6 +599,7 @@ def auto(days: float, dry_run: bool) -> list[dict]:
         return done
     if not dry_run:
         snapshot()
+        expire_closed()
     for s in live_sessions():
         if s["status"] not in QUIET or s["focused"] or s["idle_days"] is None or s["idle_days"] < days:
             continue
