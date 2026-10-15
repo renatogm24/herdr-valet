@@ -77,8 +77,10 @@
   .open-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; align-items: center; gap: calc(var(--u) * 1.5);
     padding: 6px 8px 6px 12px; min-height: 44px; }
   .open .who-s { display: flex; align-items: baseline; gap: var(--u); min-width: 0; }
-  .open .nm { font-weight: 600; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .open .fd { color: var(--muted); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 24ch; flex: none; }
+  .open .place { font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex: none; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+  .open .place .tb { color: var(--line); }
+  .open .place .sep { color: var(--faint); font-weight: 400; margin: 0 2px; }
+  .open .nm { color: var(--body); font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .open .st { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
   .open .st.working { color: var(--ok); font-weight: 600; }
   .open .acts { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
@@ -344,21 +346,24 @@ function renderLive() {
   $("c-live").textContent = ST.live.length || "";
   if (ST.herdr_error) { live.innerHTML = `<p class="err">Could not read herdr: ${esc(ST.herdr_error)}</p>`; return; }
   if (!ST.live.length) { live.innerHTML = `<p class="empty-line">No Claude sessions open in herdr.</p>`; return; }
-  // Sessions with alerts first, then the longest idle.
-  const score = (s) => (s.stats?.alerts?.length ? 1e6 : 0) + (s.idle_days ?? 0);
-  [...ST.live].sort((a, b) => score(b) - score(a)).forEach((s) => {
+  // Same order as herdr's sidebar: workspace, then tab. Alerts stand out by their border.
+  const pos = (s) => (s.workspace_number ?? 999) * 1000 + (s.tab_number ?? 999);
+  [...ST.live].sort((a, b) => pos(a) - pos(b)).forEach((s) => {
     const el = document.createElement("div");
     el.className = "open" + (s.stats?.alerts?.length ? " alert" : "");
     el.style.setProperty("--line", lineColor(project(s.label)));
     const working = s.status === "working" || s.status === "blocked";
     const idle = s.idle_days == null ? "idle" : s.idle_days < 1 ? "idle today" : `idle ${Math.floor(s.idle_days)}d`;
-    // The conversation title leads: two sessions in one directory share the label and folder.
-    const folder = (s.cwd || "").split("/").pop();
+    // Where it is in herdr (workspace › tab, as named there) leads; the conversation title
+    // follows. Unnamed tabs fall back to the folder.
+    const place = s.place || s.label;
+    const [ws, ...rest] = place.split("/");
+    const tabName = rest.join("/");
     const rc = s.recap;
     const switches = working ? [] : otherProfiles(s.profile);
     el.innerHTML = `<div class="open-row">
-        <div class="who-s"><span class="nm" title="${esc(s.title || s.label)}">${esc(s.title || s.label)}</span>
-          <span class="fd">${esc(s.title ? s.label : folder)}</span>${pfBadge(s.profile)}</div>
+        <div class="who-s"><span class="place" title="${esc(`${s.label}${s.tab ? ` › tab “${s.tab}”` : ""} — ${s.cwd || ""}`)}">${esc(ws)}${tabName ? `<span class="sep">›</span><span class="tb">${esc(tabName)}</span>` : ""}</span>
+          <span class="nm" title="${esc(s.title)}">${esc(s.title || "")}</span>${pfBadge(s.profile)}</div>
         <div class="stats">${statsHtml(s.stats)}</div>
         <span class="st ${working ? "working" : ""}">${working ? (s.status === "blocked" ? "waiting" : "working") : idle}</span>
         <div class="acts">
