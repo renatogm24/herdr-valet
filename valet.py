@@ -15,7 +15,11 @@ the full history; the card is just the index.
     valet.py auto [--days N] [--dry-run]   snapshot what is open + park sessions idle for more
                                      than N days (the timer runs this every 10 min)
     valet.py get <session_id>        one card
-    valet.py resume <session_id>     open a herdr workspace and resume there
+    valet.py resume <session_id> [--as PROFILE]   resume in herdr (in a tab of the project's
+                                     workspace if one is open), optionally with another profile
+    valet.py switch <pane_id> --as PROFILE   park an open session and resume it with another profile
+    valet.py recap <pane_id>         summarize an open session without closing it
+    valet.py stats <session_id>      context, compactions and estimated cost of a session
     valet.py delete <session_id>     delete the card (Claude keeps the conversation)
     valet.py config                  the effective configuration
 
@@ -58,6 +62,19 @@ DEFAULTS = {
     "data_dir": str(Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "herdr-valet"),
     # One port per user, so two people on the same machine don't collide.
     "port": 8790 + max(0, os.getuid() - 1000),
+    # Profiles: the ways a session can be launched (an account, a proxy, a launcher). Optional.
+    # profile_command prints the profile a session runs with ({session_id} is substituted);
+    # profiles lists the ones it can be resumed with, as "name" or "name:Label", comma-separated.
+    # resume_command receives the chosen one as {profile}.
+    "profile_command": "",
+    "profiles": "",
+    # Context window the context gauge measures against. A session seen above it is taken to run
+    # with the 1M window.
+    "context_window": 200000,
+    # Alerts on open and parked sessions: context use (%), compactions, estimated cost (USD).
+    "alert_context_pct": 80.0,
+    "alert_compactions": 3,
+    "alert_cost_usd": 25.0,
 }
 
 
@@ -94,6 +111,8 @@ HISTORY = DATA / "history"
 # differs when it is read, whatever did not come back was lost to the reboot, not closed by hand.
 SNAPSHOT = DATA / "open-sessions.json"
 LOG = DATA / "valet.log"
+# Summaries of open sessions, asked for from the page: data_dir/recaps/<session_id>.json.
+RECAPS = DATA / "recaps"
 # Each Claude account keeps its conversations in its config dir: the default one and those used
 # through CLAUDE_CONFIG_DIR (convention: ~/.claude-<something>).
 DEFAULT_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude")
@@ -427,6 +446,12 @@ def write_card(session_id: str, label: str, cwd: str | None, reason: str) -> dic
     tr = transcript_path(session_id)
     # The account's config dir: on resume it goes in as CLAUDE_CONFIG_DIR unless it is the default.
     config_dir = str(tr.parents[2]) if tr else None
+    # A recap of the conversation as it stands is already the summary: no second call.
+    rc = recap_of(session_id, tr)
+    if rc and not rc["stale"]:
+        summary = rc["summary"]
+    else:
+        summary = summarize(tr) if tr else "No transcript: the session had no conversation."
     card = {
         "session_id": session_id,
         "agent": "claude",
@@ -438,10 +463,13 @@ def write_card(session_id: str, label: str, cwd: str | None, reason: str) -> dic
         "last_activity": mtime_iso(tr) if tr else None,
         "parked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "reason": reason,
-        "summary": summarize(tr) if tr else "No transcript: the session had no conversation.",
+        "profile": profile_of(session_id),
+        "stats": stats(tr) if tr else None,
+        "summary": summary,
     }
     DATA.mkdir(parents=True, exist_ok=True)
     card_path(session_id).write_text(json.dumps(card, ensure_ascii=False, indent=2))
+    (RECAPS / f"{session_id}.json").unlink(missing_ok=True)
     return card
 
 
@@ -542,9 +570,11 @@ def auto(days: float, dry_run: bool) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- resuming
-def resume_command(c: dict) -> str:
-    """The configured resume command, filled with the card's values (shell-quoted)."""
+def resume_command(c: dict, profile: str | None = None) -> str:
+    """The configured resume command, filled with the card's values (shell-quoted). `profile`
+    overrides the one the session ran with."""
     values = {k: shlex.quote(str(c.get(k) or "")) for k in ("session_id", "cwd", "model")}
+    values["profile"] = shlex.quote(profile or c.get("profile") or profile_of(c["session_id"]))
     cmd = CONF["resume_command"].format(**values)
     if c.get("config_dir"):
         cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(c['config_dir'])} {cmd}"
@@ -563,11 +593,22 @@ def mark_resumed(session_id: str) -> None:
         src.unlink()
 
 
-def resume_in_herdr(session_id: str) -> str:
-    """Open a workspace with the card's name and directory and run the resume command there.
-    Returns the workspace id."""
+def find_workspace(label: str) -> str | None:
+    """The open workspace with this label, if any (the first one when several share it)."""
+    for ws in herdr("workspace", "list")["workspaces"]:
+        if ws["label"] == label:
+            return ws["workspace_id"]
+    return None
+
+
+def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
+    """Run the resume command in the card's directory: in a new tab of the project's workspace
+    when one is open, so sessions of one project stay together; otherwise in a new workspace
+    named after the project. Returns the workspace id."""
     c = json.loads(card_path(session_id).read_text())
-    cmd = resume_command(c)
+    if profile:
+        check_profile(profile)
+    cmd = resume_command(c, profile)
     if not herdr_running():
         raise HerdrDown(f"cd {shlex.quote(c['cwd'] or str(HOME))} && {cmd}")
     if c["cwd"] and not Path(c["cwd"]).is_dir():
@@ -577,13 +618,245 @@ def resume_in_herdr(session_id: str) -> str:
     if owners:
         raise ValueError(f"this session is already running (claude pid {', '.join(map(str, owners))}): "
                          "switch to it in herdr, or stop it before resuming here")
-    ws = herdr("workspace", "create", "--cwd", c["cwd"] or str(HOME), "--label", c["label"].split("/")[0], "--no-focus")
-    ws_id = ws["workspace"]["workspace_id"]
-    pane = herdr("pane", "list", "--workspace", ws_id)["panes"][0]["pane_id"]
+    cwd = c["cwd"] or str(HOME)
+    project, _, sub = c["label"].partition("/")
+    ws_id = find_workspace(project)
+    if ws_id:
+        tab = herdr("tab", "create", "--workspace", ws_id, "--cwd", cwd,
+                    "--label", sub or Path(cwd).name, "--no-focus")
+        pane = tab["root_pane"]["pane_id"]
+    else:
+        ws = herdr("workspace", "create", "--cwd", cwd, "--label", project, "--no-focus")
+        ws_id = ws["workspace"]["workspace_id"]
+        pane = herdr("pane", "list", "--workspace", ws_id)["panes"][0]["pane_id"]
     herdr("pane", "run", pane, cmd)
     mark_resumed(session_id)
-    log(f"resumed {session_id} in {ws_id}")
+    _PROFILE_CACHE.pop(session_id, None)
+    log(f"resumed {session_id} in {ws_id}" + (f" as {profile}" if profile else ""))
     return ws_id
+
+
+def switch(pane_id: str, profile: str) -> str:
+    """Park an open session and resume it right away with another profile."""
+    check_profile(profile)
+    card = park(pane_id, "switch")
+    sid = card["session_id"]
+    # The parked Claude got SIGTERM: give it a moment to let go of the transcript.
+    for _ in range(20):
+        if not session_owners(sid):
+            break
+        time.sleep(0.5)
+    return resume_in_herdr(sid, profile)
+
+
+# --------------------------------------------------------------------------- profiles
+_PROFILE_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def profiles() -> list[dict]:
+    """[{"name", "label"}] from `profiles = "gd:GoCode API,1:Subscription"`."""
+    out = []
+    for item in CONF["profiles"].split(","):
+        name, _, label = (x.strip() for x in item.partition(":"))
+        if name:
+            out.append({"name": name, "label": label or name})
+    return out
+
+
+def check_profile(name: str) -> None:
+    if name not in {p["name"] for p in profiles()}:
+        raise ValueError(f"unknown profile '{name}' (configured: {CONF['profiles'] or 'none'})")
+
+
+def profile_of(session_id: str) -> str:
+    """The profile the session runs with, from profile_command; "" without one. Cached a minute:
+    the page asks for every session on each refresh."""
+    if not CONF["profile_command"]:
+        return ""
+    hit = _PROFILE_CACHE.get(session_id)
+    if hit and time.time() - hit[0] < 60:
+        return hit[1]
+    cmd = [a.replace("{session_id}", session_id) for a in shlex.split(CONF["profile_command"])]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        words = out.stdout.split() if out.returncode == 0 else []
+        name = words[0][:32] if words else ""
+    except (OSError, subprocess.SubprocessError):
+        name = ""
+    _PROFILE_CACHE[session_id] = (time.time(), name)
+    return name
+
+
+# --------------------------------------------------------------------------- recaps
+def recap_of(session_id: str, tr: Path | None) -> dict | None:
+    """The saved recap of an open session; `stale` once the conversation moved on."""
+    p = RECAPS / f"{session_id}.json"
+    if not p.exists():
+        return None
+    try:
+        rc = json.loads(p.read_text())
+    except ValueError:
+        return None
+    rc["stale"] = bool(tr) and rc.get("last_activity") != mtime_iso(tr)
+    return rc
+
+
+def recap(pane_id: str) -> dict:
+    """Summarize an open session without closing it (same summary a card gets)."""
+    live = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
+    if live is None:
+        raise ValueError(f"no Claude session in pane {pane_id}")
+    tr = transcript_path(live["session_id"])
+    if not tr:
+        raise ValueError("this session has no conversation yet")
+    rc = {
+        "session_id": live["session_id"],
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "last_activity": mtime_iso(tr),
+        "summary": summarize(tr),
+    }
+    RECAPS.mkdir(parents=True, exist_ok=True)
+    (RECAPS / f"{live['session_id']}.json").write_text(json.dumps(rc, ensure_ascii=False, indent=2))
+    return {**rc, "stale": False}
+
+
+# --------------------------------------------------------------------------- stats
+# USD per million tokens: (input, output, cache read). Cache writes cost 1.25x input (5 min) or
+# 2x (1 h). Anthropic list prices: through a proxy or cloud provider the bill can differ, and on
+# a subscription it is what the session would have cost, not a charge.
+PRICES = {
+    "claude-fable-5-1": (10.0, 50.0, 0.25),
+    "claude-fable-5": (10.0, 50.0, 1.0),
+    "claude-opus-5-5": (4.0, 20.0, 0.20),
+    "claude-opus-5": (5.0, 25.0, 0.50),
+    "claude-opus-4-8": (5.0, 25.0, 0.50),
+    "claude-opus-4-7": (5.0, 25.0, 0.50),
+    "claude-opus-4-6": (5.0, 25.0, 0.50),
+    "claude-sonnet-5-5": (2.0, 10.0, 0.20),
+    "claude-sonnet-5": (2.0, 10.0, 0.20),
+    "claude-sonnet-4-6": (3.0, 15.0, 0.30),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),
+    "claude-haiku-4-5": (1.0, 5.0, 0.10),
+}
+_BY_LENGTH = sorted(PRICES, key=len, reverse=True)
+
+
+def price(model: str) -> tuple[float, float, float] | None:
+    """Prices for a model id, ignoring "[1m]" and date suffixes (claude-haiku-4-5-20251001)."""
+    m = model.split("[")[0]
+    for k in _BY_LENGTH:
+        if m == k or (m.startswith(k + "-") and m[len(k) + 1:].isdigit()):
+            return PRICES[k]
+    return None
+
+
+class _FileStats:
+    """Running totals of one transcript file, read incrementally: transcripts grow to tens of MB
+    and the page refreshes every 30 s."""
+
+    def __init__(self) -> None:
+        self.offset = 0
+        self.seen: set[str] = set()
+        self.cost = 0.0
+        self.output = 0
+        self.unpriced: set[str] = set()
+        self.context = 0
+        self.peak = 0
+        self.compactions = 0
+        self.last_compaction: dict | None = None
+
+    def feed(self, p: Path, main: bool) -> None:
+        with p.open("rb") as f:
+            f.seek(self.offset)
+            data = f.read()
+        end = data.rfind(b"\n") + 1  # a half-written last line is read next time
+        self.offset += end
+        for line in data[:end].decode(errors="replace").splitlines():
+            if '"compact_boundary"' in line or '"usage"' in line:
+                try:
+                    self._record(json.loads(line), main)
+                except ValueError:
+                    continue
+
+    def _record(self, d: dict, main: bool) -> None:
+        if d.get("type") == "system" and d.get("subtype") == "compact_boundary":
+            self.compactions += 1
+            meta = d.get("compactMetadata") or {}
+            self.last_compaction = {"at": d.get("timestamp"), "trigger": meta.get("trigger"),
+                                    "pre_tokens": meta.get("preTokens")}
+            return
+        msg = d.get("message") or {}
+        u, model = msg.get("usage"), msg.get("model") or ""
+        if d.get("type") != "assistant" or not u or model.startswith("<"):
+            return
+        # The context is what the last request sent: input plus cache reads and writes.
+        ctx = (u.get("input_tokens") or 0) + (u.get("cache_read_input_tokens") or 0) + (u.get("cache_creation_input_tokens") or 0)
+        if main and not d.get("isSidechain"):
+            self.context = ctx
+            self.peak = max(self.peak, ctx)
+        # One reply is stored as one record per content block, each with the same usage.
+        mid = msg.get("id") or d.get("requestId") or d.get("uuid")
+        if mid in self.seen:
+            return
+        self.seen.add(mid)
+        self.output += u.get("output_tokens") or 0
+        pr = price(model)
+        if not pr:
+            self.unpriced.add(model)
+            return
+        inp, out, read = pr
+        cc = u.get("cache_creation") or {}
+        w1h = cc.get("ephemeral_1h_input_tokens") or 0
+        w5m = (u.get("cache_creation_input_tokens") or 0) - w1h
+        self.cost += ((u.get("input_tokens") or 0) * inp + w5m * inp * 1.25 + w1h * inp * 2
+                      + (u.get("cache_read_input_tokens") or 0) * read + (u.get("output_tokens") or 0) * out) / 1e6
+
+
+_STATS: dict[str, _FileStats] = {}
+
+
+def _file_stats(p: Path, main: bool) -> _FileStats:
+    st = _STATS.get(str(p))
+    try:
+        size = p.stat().st_size
+    except OSError:
+        return st or _FileStats()
+    if st is None or size < st.offset:  # new, or rewritten shorter: start over
+        st = _STATS[str(p)] = _FileStats()
+    if size > st.offset:
+        st.feed(p, main)
+    return st
+
+
+def stats(tr: Path) -> dict:
+    """Context in use, compactions and estimated cost of a session, its subagents included, plus
+    the alerts it trips."""
+    main = _file_stats(tr, True)
+    subs = [_file_stats(p, False) for p in sorted((tr.parent / tr.stem / "subagents").glob("*.jsonl"))]
+    window = CONF["context_window"]
+    if main.peak > window:
+        window = 1_000_000
+    pct = round(100 * main.context / window, 1) if window else 0
+    cost = round(main.cost + sum(s.cost for s in subs), 2)
+    alerts = []
+    if pct >= CONF["alert_context_pct"]:
+        alerts.append(f"context {pct:.0f}% full")
+    if main.compactions >= CONF["alert_compactions"]:
+        alerts.append(f"compacted {main.compactions}x")
+    if cost >= CONF["alert_cost_usd"]:
+        alerts.append(f"${cost:.0f} spent")
+    return {
+        "context_tokens": main.context,
+        "context_window": window,
+        "context_pct": pct,
+        "compactions": main.compactions,
+        "last_compaction": main.last_compaction,
+        "cost_usd": cost,
+        "output_tokens": main.output + sum(s.output for s in subs),
+        "subagents": len(subs),
+        "unpriced_models": sorted(main.unpriced.union(*(s.unpriced for s in subs))),
+        "alerts": alerts,
+    }
 
 
 def title(c: dict) -> str:
@@ -605,8 +878,15 @@ def main() -> int:
     a = sub.add_parser("auto")
     a.add_argument("--days", type=float, default=CONF["idle_days"])
     a.add_argument("--dry-run", action="store_true")
-    for name in ("get", "delete", "resume"):
+    for name in ("get", "delete", "stats"):
         sub.add_parser(name).add_argument("session_id")
+    r = sub.add_parser("resume")
+    r.add_argument("session_id")
+    r.add_argument("--as", dest="profile")
+    sw = sub.add_parser("switch")
+    sw.add_argument("pane_id")
+    sw.add_argument("--as", dest="profile", required=True)
+    sub.add_parser("recap").add_argument("pane_id")
     sub.add_parser("config")
     args = ap.parse_args()
 
@@ -639,12 +919,28 @@ def main() -> int:
     elif args.cmd == "delete":
         card_path(args.session_id).unlink(missing_ok=True)
         log(f"deleted {args.session_id}")
-    elif args.cmd == "resume":
+    elif args.cmd in ("resume", "switch"):
         try:
-            print(resume_in_herdr(args.session_id))
+            print(resume_in_herdr(args.session_id, args.profile) if args.cmd == "resume"
+                  else switch(args.pane_id, args.profile))
         except HerdrDown as e:
             print(f"herdr is not running; by hand: {e}", file=sys.stderr)
             return 1
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "recap":
+        try:
+            print(recap(args.pane_id)["summary"])
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "stats":
+        tr = transcript_path(args.session_id)
+        if not tr:
+            print(f"no transcript for {args.session_id}", file=sys.stderr)
+            return 1
+        print(json.dumps(stats(tr), indent=2))
     elif args.cmd == "config":
         print(f"# {CONFIG_FILE}{'' if CONFIG_FILE.is_file() else ' (missing: all defaults)'}")
         for k, v in CONF.items():
