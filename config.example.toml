@@ -40,5 +40,11 @@
 # alert_compactions = 3
 # alert_cost_usd = 25
 
+# `continue`: how the fresh session starts, in a new tab of the old one's workspace and directory.
+# {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd} and {handoff} are
+# substituted, already shell-quoted. continue_prompt is its first message ({handoff} = the file's path).
+# continue_command = "claude --model {model} {prompt}"
+# continue_prompt = "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off."
+
 # Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
 # closed_keep_days = 7

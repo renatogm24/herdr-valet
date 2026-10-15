@@ -18,6 +18,9 @@ the full history; the card is just the index.
     valet.py resume <session_id> [--as PROFILE]   resume in herdr (in a tab of the project's
                                      workspace if one is open), optionally with another profile
     valet.py switch <pane_id> --as PROFILE   park an open session and resume it with another profile
+    valet.py continue <handoff.md> [--from PANE] [--keep]   hand the session over to a fresh one:
+                                     a new tab next to it starts Claude on the handoff file, then
+                                     the old one is parked (pane from $HERDR_PANE_ID by default)
     valet.py recap <pane_id>         summarize an open session without closing it
     valet.py stats <session_id>      context, compactions and estimated cost of a session
     valet.py delete <session_id>     delete the card (Claude keeps the conversation)
@@ -75,6 +78,12 @@ DEFAULTS = {
     "alert_context_pct": 80.0,
     "alert_compactions": 3,
     "alert_cost_usd": 25.0,
+    # `continue`: how the fresh session is started, in a new tab of the old one's workspace and
+    # directory. {prompt}, {model}, {cwd} and {handoff} are substituted (already shell-quoted);
+    # {model} is the one the old session requested, "[1m]" included.
+    "continue_command": "claude --model {model} {prompt}",
+    # Its first message. {handoff} is the handoff file's absolute path.
+    "continue_prompt": "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off.",
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
     # after this many days.
     "closed_keep_days": 7.0,
@@ -328,6 +337,20 @@ def last_model(p: Path) -> str:
     return ""
 
 
+def requested_model(p: Path) -> str:
+    """The model the session asked for, which keeps the "[1m]" suffix that message.model drops."""
+    for line in reversed(_tail(p)):
+        if '"requestedModel"' not in line:
+            continue
+        try:
+            model = json.loads(line).get("requestedModel")
+        except ValueError:
+            continue
+        if model:
+            return model
+    return ""
+
+
 def mtime_iso(p: Path) -> str:
     return last_activity(p).isoformat(timespec="seconds")
 
@@ -459,7 +482,7 @@ def display_label(live: dict) -> str:
     return label
 
 
-def write_card(session_id: str, label: str, cwd: str | None, reason: str) -> dict:
+def write_card(session_id: str, label: str, cwd: str | None, reason: str, extra: dict | None = None) -> dict:
     tr = transcript_path(session_id)
     # The account's config dir: on resume it goes in as CLAUDE_CONFIG_DIR unless it is the default.
     config_dir = str(tr.parents[2]) if tr else None
@@ -484,20 +507,24 @@ def write_card(session_id: str, label: str, cwd: str | None, reason: str) -> dic
         "stats": stats(tr) if tr else None,
         "summary": summary,
     }
+    link = chains().get(session_id)
+    if link:
+        card["continued_from"] = link["from"]
+    card.update(extra or {})
     DATA.mkdir(parents=True, exist_ok=True)
     card_path(session_id).write_text(json.dumps(card, ensure_ascii=False, indent=2))
     (RECAPS / f"{session_id}.json").unlink(missing_ok=True)
     return card
 
 
-def park(pane_id: str, reason: str) -> dict:
+def park(pane_id: str, reason: str, extra: dict | None = None) -> dict:
     live = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
     if live is None:
         # ValueError and not SystemExit: the page reports it as a 400 instead of dropping the
         # connection.
         raise ValueError(f"no Claude session in pane {pane_id}")
     # The card is written BEFORE closing: if something fails afterwards, the context is not lost.
-    card = write_card(live["session_id"], display_label(live), live["cwd"], reason)
+    card = write_card(live["session_id"], display_label(live), live["cwd"], reason, extra)
     close_pane(live)
     strays = kill_strays(live["session_id"])
     log(f"parked {card['session_id']} ({card['label']}, {reason}, idle {live['idle_days']} d)"
@@ -691,6 +718,81 @@ def switch(pane_id: str, profile: str) -> str:
             break
         time.sleep(0.5)
     return resume_in_herdr(sid, profile)
+
+
+# --------------------------------------------------------------------------- continuing
+# Which session continued which: {new_session_id: {"from": old_session_id, "handoff": path}}.
+CHAINS = DATA / "chains.json"
+
+
+def chains() -> dict:
+    try:
+        return json.loads(CHAINS.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def continue_session(handoff: str, pane_id: str | None = None, keep: bool = False, wait_s: float = 90) -> dict:
+    """Hand a long conversation over to a fresh one. Opens a tab in the old session's workspace
+    and directory running continue_command, whose first message points at the handoff file; waits
+    until Claude reports a session in it; then parks the old one, its card saying where it went.
+
+    Meant to be run from inside the old session (the pane defaults to $HERDR_PANE_ID): closing
+    that pane would kill this process, so the park runs detached and this returns before it."""
+    pane_id = pane_id or os.environ.get("HERDR_PANE_ID")
+    if not pane_id:
+        raise ValueError("which pane? pass --from, or run it inside herdr")
+    path = Path(handoff).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"handoff file not found: {path}")
+    if not herdr_running():
+        raise HerdrDown("start herdr first")
+    old = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
+    if old is None:
+        raise ValueError(f"no Claude session in pane {pane_id}")
+    tr = transcript_path(old["session_id"])
+    cwd = old["cwd"] or str(HOME)
+    values = {
+        "prompt": CONF["continue_prompt"].format(handoff=path),
+        "model": (requested_model(tr) or last_model(tr)) if tr else "",
+        "cwd": cwd,
+        "handoff": str(path),
+    }
+    cmd = CONF["continue_command"].format(**{k: shlex.quote(v) for k, v in values.items()})
+    config_dir = str(tr.parents[2]) if tr else str(DEFAULT_CONFIG_DIR)
+    if config_dir != str(DEFAULT_CONFIG_DIR):
+        cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(config_dir)} {cmd}"
+    tab = herdr("tab", "create", "--workspace", old["workspace_id"], "--cwd", cwd,
+                "--label", old.get("tab") or Path(cwd).name, "--focus")
+    pane = tab["root_pane"]["pane_id"]
+    herdr("pane", "run", pane, cmd)
+    new_sid = None
+    deadline = time.time() + wait_s
+    while time.time() < deadline and not new_sid:
+        time.sleep(2)
+        new_sid = next((s["session_id"] for s in live_sessions()
+                        if s["pane_id"] == pane and s["session_id"] != old["session_id"]), None)
+    result = {"pane_id": pane, "session_id": new_sid, "from": old["session_id"], "parked": False}
+    if not new_sid:
+        # Without a confirmed successor the old session stays open: nothing is lost.
+        log(f"continue {old['session_id']}: no session showed up in {pane} within {wait_s:.0f} s")
+        return result
+    links = chains()
+    links[new_sid] = {"from": old["session_id"], "handoff": str(path)}
+    DATA.mkdir(parents=True, exist_ok=True)
+    CHAINS.write_text(json.dumps(links, ensure_ascii=False, indent=2))
+    log(f"continued {old['session_id']} in {new_sid} ({pane}), handoff {path}")
+    if keep:
+        return result
+    park_args = [sys.executable, str(Path(__file__).resolve()), "park", pane_id, "--reason", "continued",
+                 "--continued-in", new_sid, "--handoff", str(path)]
+    if pane_id == os.environ.get("HERDR_PANE_ID"):
+        with open(os.devnull, "wb") as null:
+            subprocess.Popen(park_args, stdin=null, stdout=null, stderr=null, start_new_session=True)
+    else:
+        park(pane_id, "continued", {"continued_in": new_sid, "handoff": str(path)})
+    result["parked"] = True
+    return result
 
 
 # --------------------------------------------------------------------------- profiles
@@ -918,7 +1020,11 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name in ("list", "live"):
         sub.add_parser(name).add_argument("--json", action="store_true")
-    sub.add_parser("park").add_argument("pane_id")
+    pk = sub.add_parser("park")
+    pk.add_argument("pane_id")
+    pk.add_argument("--reason", default="manual")
+    pk.add_argument("--continued-in")
+    pk.add_argument("--handoff")
     a = sub.add_parser("auto")
     a.add_argument("--days", type=float, default=CONF["idle_days"])
     a.add_argument("--dry-run", action="store_true")
@@ -930,6 +1036,10 @@ def main() -> int:
     sw = sub.add_parser("switch")
     sw.add_argument("pane_id")
     sw.add_argument("--as", dest="profile", required=True)
+    co = sub.add_parser("continue")
+    co.add_argument("handoff")
+    co.add_argument("--from", dest="pane_id")
+    co.add_argument("--keep", action="store_true", help="leave the old session open")
     sub.add_parser("recap").add_argument("pane_id")
     sub.add_parser("config")
     args = ap.parse_args()
@@ -948,7 +1058,8 @@ def main() -> int:
             print(f"{s['pane_id']:<8} {s['label']:<22} {s['status']:<8} {s['idle_days'] or 0:6.1f} d  {s['session_id']}")
     elif args.cmd == "park":
         try:
-            print(json.dumps(park(args.pane_id, "manual"), ensure_ascii=False, indent=2))
+            extra = {k: v for k, v in (("continued_in", args.continued_in), ("handoff", args.handoff)) if v}
+            print(json.dumps(park(args.pane_id, args.reason, extra), ensure_ascii=False, indent=2))
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
@@ -972,6 +1083,19 @@ def main() -> int:
             return 1
         except ValueError as e:
             print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "continue":
+        try:
+            r = continue_session(args.handoff, args.pane_id, args.keep)
+        except HerdrDown as e:
+            print(f"herdr is not running: {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+        print(json.dumps(r, ensure_ascii=False))
+        if not r["session_id"]:
+            print("no session showed up in the new tab: the old one stays open", file=sys.stderr)
             return 1
     elif args.cmd == "recap":
         try:
