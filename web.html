@@ -137,7 +137,8 @@
   .stop[aria-current="true"] { background: var(--accent-soft); }
   .stop[aria-current="true"] .node { background: var(--line); transform: scale(1.35); }
   .stop[aria-current="true"] .t { font-weight: 650; }
-  .terminus { --line: var(--rule-strong); }
+  .terminus, .closed-line { --line: var(--rule-strong); }
+  .closed-line .t { color: var(--body); }
   .terminus .stop { cursor: default; }
   .terminus .stop:hover { background: none; }
   .terminus .t { color: var(--muted); }
@@ -345,8 +346,11 @@ function matches(c) {
   const hay = [c.label, c.cwd, c.branch, c.model, c.summary].join(" ").toLowerCase();
   return query.split(/\s+/).every((w) => hay.includes(w));
 }
-const visibleCards = () => ST.parked.filter(matches);
 const isReboot = (c) => c.reason === "reboot" || c.reason === "reinicio";
+const isClosed = (c) => c.reason === "closed";
+// Parked first, then closed by hand: the order the map shows them, and ↑/↓ follow.
+const visibleCards = () => { const v = ST.parked.filter(matches); return [...v.filter((c) => !isClosed(c)), ...v.filter(isClosed)]; };
+const daysLeft = (c) => Math.max(0, Math.ceil(ST.closed_keep_days - (Date.now() - new Date(c.parked_at).getTime()) / 86400000));
 
 // ------------------------------------------------------------------ open now
 function renderLive() {
@@ -421,9 +425,22 @@ function renderMap() {
   const map = $("map");
   if (map.contains(DETAIL)) map.after(DETAIL);
   map.replaceChildren();
-  const cards = visibleCards();
+  const all = visibleCards();
+  const cards = all.filter((c) => !isClosed(c)), closed = all.filter(isClosed);
   if (!ST.parked.length) map.innerHTML = `<p class="map-empty">No parked sessions yet.</p>`;
-  else if (!cards.length) map.innerHTML = `<p class="map-empty">Nothing matches “${esc(query)}”.</p>`;
+  else if (!all.length) map.innerHTML = `<p class="map-empty">Nothing matches “${esc(query)}”.</p>`;
+  const stop = (c, when, whenTitle) => {
+    const s = parseSummary(c.summary);
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.className = "stop" + (isReboot(c) ? " reboot" : "");
+    b.dataset.id = c.session_id;
+    b.setAttribute("aria-current", String(c.session_id === selected));
+    b.innerHTML = `<span class="node" aria-hidden="true"></span><span class="t">${esc(s["Title"] || c.label)}</span><span class="a" title="${esc(whenTitle)}">${esc(when)}</span>`;
+    b.onclick = () => select(c.session_id, true);
+    li.append(b);
+    return li;
+  };
   // Group by project; the API already sorts newest first, so lines follow their latest stop.
   const groups = new Map();
   for (const c of cards) {
@@ -437,18 +454,16 @@ function renderMap() {
     sec.style.setProperty("--line", lineColor(p));
     sec.innerHTML = `<h3 class="line-h"><span class="bullet" aria-hidden="true"></span>${esc(p)}<span class="ct">${list.length}</span></h3><ol class="stops"></ol>`;
     const ol = sec.querySelector("ol");
-    for (const c of list) {
-      const s = parseSummary(c.summary);
-      const li = document.createElement("li");
-      const b = document.createElement("button");
-      b.className = "stop" + (isReboot(c) ? " reboot" : "");
-      b.dataset.id = c.session_id;
-      b.setAttribute("aria-current", String(c.session_id === selected));
-      b.innerHTML = `<span class="node" aria-hidden="true"></span><span class="t">${esc(s["Title"] || c.label)}</span><span class="a" title="Last message">${short(c.last_activity || c.parked_at)}</span>`;
-      b.onclick = () => select(c.session_id, true);
-      li.append(b);
-      ol.append(li);
-    }
+    for (const c of list) ol.append(stop(c, short(c.last_activity || c.parked_at), "Last message"));
+    map.append(sec);
+  }
+  // Closed by hand: kept a few days in case closing was a mistake, in grey, after the lines.
+  if (closed.length) {
+    const sec = document.createElement("section");
+    sec.className = "line closed-line";
+    sec.innerHTML = `<h3 class="line-h" title="Panes you closed yourself. Each card goes away ${esc(ST.closed_keep_days)} days after closing."><span class="bullet" aria-hidden="true"></span>Closed by hand<span class="ct">${closed.length}</span></h3><ol class="stops"></ol>`;
+    const ol = sec.querySelector("ol");
+    for (const c of closed) ol.append(stop(c, `${project(c.label)} · ${daysLeft(c)}d left`, "Goes away after this"));
     map.append(sec);
   }
   // Terminus: recently resumed, in grey, at the end of the map.
@@ -493,7 +508,7 @@ function renderDetail() {
       ${c.branch ? `<span>Branch <b class="mono">${esc(c.branch)}</b></span>` : ""}
       <span>Model <b>${esc(c.model || "default")}</b></span>
       ${c.profile ? `<span>Runs on ${pfBadge(c.profile)}</span>` : ""}
-      ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : `<span>Parked by hand</span>`}
+      ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : isClosed(c) ? `<span class="reboot" title="You closed its pane; this card goes away on its own">Closed by hand · goes away in ${daysLeft(c)}d</span>` : `<span>Parked by hand</span>`}
     </div>
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
     ${alertsHtml(c.stats)}
@@ -578,8 +593,9 @@ async function load() {
     const r = await fetch("api/state", { cache: "no-store" });
     ST = await r.json();
     $("who").textContent = ST.user;
-    document.title = `herdr-valet · ${ST.parked.length} parked`;
-    $("n-parked").textContent = ST.parked.length;
+    const nParked = ST.parked.filter((c) => !isClosed(c)).length;
+    document.title = `herdr-valet · ${nParked} parked`;
+    $("n-parked").textContent = nParked;
     $("n-live").textContent = ST.live.length;
     const nAlerts = ST.live.filter((s) => s.stats?.alerts?.length).length;
     $("n-alerts").textContent = nAlerts; $("n-alerts-w").hidden = !nAlerts;

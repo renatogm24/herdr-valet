@@ -13,6 +13,8 @@ herdr-valet:
    Never a session that is working, waiting for an answer or focused.
 3. **Survives a reboot:** it keeps a snapshot of what is open. If the machine reboots, every
    session that did not come back gets its card ("cut off by a reboot").
+   A session closed by hand (pane closed, Claude exited) gets one too, kept for
+   `closed_keep_days` (7); empty sessions, `/clear` and `/resume` don't.
 4. **Web page** (`127.0.0.1:8790`): parked sessions with their summary and a **Resume in herdr**
    button, open sessions with **Park**, and recently resumed ones. Works from a phone.
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents

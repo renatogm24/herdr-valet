@@ -39,3 +39,6 @@
 # alert_context_pct = 80
 # alert_compactions = 3
 # alert_cost_usd = 25
+
+# Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
+# closed_keep_days = 7
