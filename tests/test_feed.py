@@ -28,6 +28,7 @@ class FakeJira:
     def __init__(self):
         self.calls = []
         self.issues = []
+        self.standing = []
         self.full = {}
 
     def __call__(self, method, path, body=None):
@@ -35,6 +36,8 @@ class FakeJira:
         if path == "/rest/api/3/myself":
             return {"accountId": ME}
         if path == "/rest/api/3/search/jql":
+            if "updated >=" not in body["jql"]:
+                return {"issues": self.standing}
             return {"issues": self.issues, "isLast": True}
         key = path.split("/issue/")[1].split("?")[0]
         return self.full.get(key, {})
@@ -94,7 +97,11 @@ class FeedTest(unittest.TestCase):
         self.jira.full["ABC-1"] = {
             "changelog": {"histories": [{"id": "9", "created": "2099-01-02T10:00:00.000-0500", "author": {"displayName": "Ana Torres"},
                                          "items": [{"field": "status", "fromString": "To Do", "toString": "In Progress"}]},
-                                        {"id": "1", "created": "2000-01-01T00:00:00.000+0000", "items": [{"field": "old"}]}]},
+                                        {"id": "1", "created": "2000-01-01T00:00:00.000+0000", "items": [{"field": "old"}]},
+                                        {"id": "10", "created": "2099-01-02T10:01:00.000-0500", "author": {"displayName": "Automation for Jira", "accountType": "app"},
+                                         "items": [{"field": "Link", "toString": "relates to ABC-2"}]},
+                                        {"id": "11", "created": "2099-01-02T10:02:00.000-0500", "author": {"displayName": "Ana Torres"},
+                                         "items": [{"field": "status", "fromString": "Done", "toString": "Done"}]}]},
             "fields": {"comment": {"comments": [{"id": "77", "created": "2099-01-02T11:00:00.000-0500", "author": {"displayName": "Leo Paz", "accountId": "x"},
                                                  "body": adf("Can you check the logs?")}]}},
         }
@@ -108,9 +115,20 @@ class FeedTest(unittest.TestCase):
         self.assertEqual(state["ts"], "2099-01-02T10:00:00.000-05:00")
         self.assertEqual(state["ref"], "ABC-1")
         self.assertEqual(change["text"], "Ana Torres: status: To Do → In Progress")
+        self.assertEqual(change["meta"]["by"], "Ana Torres")
         self.assertEqual(comment["text"], "Leo Paz: Can you check the logs?")
         self.assertEqual(self.sent[0][0], "feed")
         jql = self.jira.calls[1][2]["jql"]
+        # A standing assigned issue that did not change: state only, no changelog call.
+        self.sent.clear()
+        self.jira.issues = []
+        self.jira.standing = [{"key": "ABC-7", "fields": {"summary": "Old epic", "updated": "2000-01-01T00:00:00.000+0000",
+                                                          "status": {"name": "To Do", "statusCategory": {"key": "new"}},
+                                                          "issuetype": {"name": "Epic"}, "assignee": {"accountId": ME}}}]
+        self.jira.calls.clear()
+        valet.feed()
+        self.assertEqual([(e["ref"], e["meta"]["event"]) for e in self.events()], [("ABC-7", "state")])
+        self.assertFalse([c for c in self.jira.calls if "/issue/" in c[1]])
         self.assertIn("assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()", jql)
 
     def test_github_only_what_changed_and_final_state(self):
@@ -120,7 +138,9 @@ class FeedTest(unittest.TestCase):
                          "acme/other#12": view("acme/other", 12, "2099-01-01T11:00:00Z", author="ana")}
         self.gh.events = [{"id": "5", "type": "PullRequestReviewEvent", "created_at": "2099-01-01T12:00:00Z", "repo": {"name": "acme/x"},
                            "payload": {"review": {"state": "approved", "body": ""}, "pull_request": {"number": 3, "title": "Y", "html_url": "https://github.com/acme/x/pull/3"}}},
-                          {"id": "4", "type": "PushEvent", "created_at": "2099-01-01T12:00:00Z", "repo": {"name": "acme/x"}, "payload": {}}]
+                          {"id": "4", "type": "PushEvent", "created_at": "2099-01-01T12:00:00Z", "repo": {"name": "acme/x"}, "payload": {}},
+                          {"id": "6", "type": "PullRequestEvent", "created_at": "2099-01-01T12:00:00Z", "repo": {"name": "acme/x"},
+                           "payload": {"action": "labeled", "pull_request": {"number": 3, "title": "Y"}}}]
         self.gh.notifs = [{"id": "n1", "reason": "mention", "updated_at": "2099-01-01T12:00:00Z", "repository": {"full_name": "acme/x"},
                            "subject": {"title": "Deploy plan", "url": "https://api.github.com/repos/acme/x/pulls/3"}},
                           {"id": "n2", "reason": "ci_activity", "updated_at": "2099-01-01T12:00:00Z", "repository": {"full_name": "acme/x"}, "subject": {}}]

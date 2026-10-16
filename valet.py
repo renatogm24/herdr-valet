@@ -1374,6 +1374,7 @@ def sync(dry_run: bool = False) -> dict:
 # Incremental: Jira by `updated >= -Nm` since the last run, GitHub by remembering each PR's last state.
 # Nothing is written to Jira or GitHub. Secrets are masked like everything sync sends.
 FEED_REASONS = ("review_requested", "mention", "author")
+FEED_PR_ACTIONS = ("opened", "closed", "reopened", "ready_for_review")
 FEED_ACTIVITY = ("PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent", "IssueCommentEvent")
 
 
@@ -1453,9 +1454,15 @@ def feed_jira(state: dict, now: float) -> list[dict]:
         token = r.get("nextPageToken")
         if not token or r.get("isLast", True):
             break
+    # My open assigned issues, changed or not: the receiver keeps them as to-dos, and one that did not move in
+    # the backfill window would never arrive otherwise. Only their state (same source_id = no duplicate there).
+    seen = {it["key"] for it in issues}
+    r = _jira("POST", "/rest/api/3/search/jql", {"jql": "assignee = currentUser() AND statusCategory != Done",
+                                                   "fields": ["summary", "status", "issuetype", "assignee", "updated"], "maxResults": 100})
+    standing = [it for it in r.get("issues") or [] if it["key"] not in seen]
     since_iso = datetime.fromtimestamp(since - 300, timezone.utc).isoformat()
     events = []
-    for it in issues:
+    for it in issues + standing:
         key, f = it["key"], it.get("fields") or {}
         status = f.get("status") or {}
         summary = f.get("summary") or key
@@ -1470,16 +1477,23 @@ def feed_jira(state: dict, now: float) -> list[dict]:
                               "assignee_me": bool(me) and ((f.get("assignee") or {}).get("accountId") == me),
                               "url": url,
                           }))
+        if key not in seen:
+            continue  # standing: state only
         full = _jira("GET", f"/rest/api/3/issue/{key}?expand=changelog&fields=comment")
         for h in (full.get("changelog") or {}).get("histories") or []:
             at = _iso(h.get("created") or "")
             if not at or datetime.fromisoformat(at) < datetime.fromisoformat(since_iso):
                 continue
-            who = (h.get("author") or {}).get("displayName", "")
+            author = h.get("author") or {}
+            if author.get("accountType") == "app" or "automation" in (author.get("displayName") or "").lower():
+                continue  # Automation for Jira and other apps: links and no-op transitions nobody asked for
+            who = author.get("displayName", "")
             for i, ch in enumerate(h.get("items") or []):
+                if (ch.get("fromString") or "") == (ch.get("toString") or ""):
+                    continue  # "Done → Done" says nothing
                 text = f"{ch.get('field')}: {ch.get('fromString') or '—'} → {ch.get('toString') or '—'}"
                 events.append(_ev("jira", f"{key}/log/{h.get('id')}/{i}", "jira", at, key, title, f"{who}: {text}" if who else text,
-                                  {"event": "change", "key": key, "author": who, "field": ch.get("field"), "url": url}))
+                                  {"event": "change", "key": key, "by": who, "field": ch.get("field"), "url": url}))
         for c in ((full.get("fields") or {}).get("comment") or {}).get("comments") or []:
             at = _iso(c.get("updated") or c.get("created") or "")
             if not at or datetime.fromisoformat(at) < datetime.fromisoformat(since_iso):
@@ -1487,7 +1501,7 @@ def feed_jira(state: dict, now: float) -> list[dict]:
             who = (c.get("author") or {}).get("displayName", "")
             body = _adf_text(c.get("body")).strip()
             events.append(_ev("jira", f"{key}/comment/{c.get('id')}/{at}", "jira", at, key, title, f"{who}: {body[:4000]}", {
-                "event": "comment", "key": key, "author": who,
+                "event": "comment", "key": key, "by": who,
                 "mine": (c.get("author") or {}).get("accountId") == me, "url": url,
             }))
     st["pending_last"] = now
@@ -1565,11 +1579,12 @@ def feed_github(state: dict, now: float) -> list[dict]:
         top = last_id
         for e in _gh("api", f"users/{login}/events?per_page=100") or []:
             eid = int(e.get("id") or 0)
-            if eid <= last_id or e.get("type") not in FEED_ACTIVITY:
-                top = max(top, eid)
-                continue
             top = max(top, eid)
             pl, repo = e.get("payload") or {}, (e.get("repo") or {}).get("name", "")
+            if eid <= last_id or e.get("type") not in FEED_ACTIVITY:
+                continue
+            if e["type"] == "PullRequestEvent" and pl.get("action") not in FEED_PR_ACTIONS:
+                continue  # labeled, synchronize, assigned…: noise
             pr = pl.get("pull_request") or pl.get("issue") or {}
             ref = f"{repo}#{pr.get('number')}" if pr.get("number") else repo
             what = {
