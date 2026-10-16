@@ -60,3 +60,17 @@
 # sync_host = "<short hostname>"
 # sync_knowledge_prefix = "knowledge-"
 # sync_backfill_days = 7
+
+# `feed`, run by the timer after sync: what changes in YOUR Jira issues (assigned, reported, watched) and
+# GitHub PRs (yours and the reviews asked of you), to the same sync_url. Read-only on both sides. Each source
+# is off while its key is empty. GitHub goes through `gh`, as the account it is logged in with.
+# feed_github_login = "your-github-login"
+# gh_command = "gh"
+# Jira Cloud, read-only API token (Basic email:token). Classic token: "https://<site>.atlassian.net";
+# scoped token: "https://api.atlassian.com/ex/jira/<cloudId>" (cloudId: https://<site>.atlassian.net/_edge/tenant_info).
+# feed_jira_api = "https://api.atlassian.com/ex/jira/<cloudId>"
+# feed_jira_site = "https://<site>.atlassian.net"
+# feed_jira_email = "you@example.com"
+# feed_jira_token_file = "~/.config/herdr-valet/jira-token"
+# feed_jira_token_expires = "YYYY-MM-DD"   # 3 days before, feed sends a "renew the token" note
+# feed_backfill_days = 7

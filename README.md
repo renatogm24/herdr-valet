@@ -31,6 +31,10 @@ herdr-valet:
    since the last run: each conversation entry (user and assistant text, by `uuid`), cards and
    recaps. No LLM on the machine; whoever receives it summarizes. Sessions in a herdr tab named
    `knowledge-…` send everything, tool calls and results included. Secrets are masked first.
+9. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
+   Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
+   the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
+   Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
 
 Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
 a new workspace otherwise: the whole conversation comes back; the card is just the index.
@@ -57,7 +61,7 @@ command; cards and config stay.
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
 - CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
   `switch <pane_id> --as PROFILE`, `recap <pane_id>`, `stats <session_id>`,
-  `auto --dry-run` (what it would park), `sync [--dry-run]`, `config`.
+  `auto --dry-run` (what it would park), `sync [--dry-run]`, `feed [--dry-run]`, `config`.
 
 ## Configuration
 
@@ -90,6 +94,14 @@ everything: treat it as a second line, not the only one. The Bearer token lives 
 (`<session_id>/<uuid>`), `kind` (`session`, `session_knowledge`, `card`, `recap`), `ts`, `ref`
 (the session id), `role`, `text`, `title`, `meta` (cwd, branch, tab, label). Answer 200 to
 advance; a 400 is logged and skipped; anything else is retried on the next run.
+
+`feed` uses the same webhook and token, with `agent: "feed"`. Jira events (`kind: jira`, `ref` = the issue
+key) and GitHub events (`kind: github`, `ref` = `owner/repo#n`) carry `meta.event`: `state` (an issue's
+summary, status, status category, whether it is assigned to you) and `pr_state` (a PR's state, draft,
+approved, whether you are its author or a requested reviewer) for keeping a to-do list in step; `change`,
+`comment`, `activity` and `notification` as one-line happenings. `meta.url` links back. The Jira token
+should be read-only (`read:jira-work`, `read:jira-user`); with `feed_jira_token_expires` set, three days
+before it expires (or on a 401) feed sends a `note` asking to renew it. Tests: `python3 -m unittest discover -s tests`.
 
 ## Limitations
 
