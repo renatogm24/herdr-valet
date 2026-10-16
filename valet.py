@@ -1377,6 +1377,8 @@ def sync(dry_run: bool = False) -> dict:
 # Incremental: Jira by `updated >= -Nm` since the last run, GitHub by remembering each PR's last state.
 # Nothing is written to Jira or GitHub. Secrets are masked like everything sync sends.
 FEED_REASONS = ("review_requested", "mention", "author")
+# Version of the pr_state fields: bump it when they change and every followed PR is resent once with them.
+FEED_GH_V = 2  # 2: author
 FEED_PR_ACTIONS = ("opened", "closed", "reopened", "ready_for_review")
 FEED_ACTIVITY = ("PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent", "IssueCommentEvent")
 
@@ -1549,8 +1551,10 @@ def feed_github(state: dict, now: float) -> list[dict]:
         repo, _, num = ref.rpartition("#")
         p = mine.get(ref) or asked.get(ref) or merged.get(ref)
         known = prev.get(ref)
-        if p and known and known.get("updated") == p.get("updatedAt") and known.get("requested") == (ref in asked):
-            continue  # nothing changed since it was sent
+        # Unchanged since it was sent, in the current format: skip. A new FEED_GH_V resends each one once.
+        if (p and known and known.get("v") == FEED_GH_V and known.get("updated") == p.get("updatedAt")
+                and known.get("requested") == (ref in asked)):
+            continue
         v = _gh("pr", "view", num, "--repo", repo, "--json",
                 "number,title,url,state,isDraft,updatedAt,reviewDecision,reviewRequests,statusCheckRollup,author")
         state_ = (v.get("state") or "").lower()  # open | merged | closed
@@ -1559,8 +1563,8 @@ def feed_github(state: dict, now: float) -> list[dict]:
         checks = [c.get("conclusion") or c.get("status") for c in v.get("statusCheckRollup") or []]
         pr_author = (v.get("author") or {}).get("login") or ""
         sig = "|".join(map(str, (state_, v.get("isDraft"), v.get("reviewDecision"), requested, v.get("updatedAt"), pr_author)))
-        if (known or {}).get("sig") == sig:
-            st.setdefault("pending_prs", {})[ref] = {**known, "updated": v.get("updatedAt"), "seen": now}
+        if (known or {}).get("sig") == sig and (known or {}).get("v") == FEED_GH_V:
+            st.setdefault("pending_prs", {})[ref] = {**known, "updated": v.get("updatedAt"), "seen": now, "v": FEED_GH_V}
             continue
         reviewers = ", ".join(r.get("login") or r.get("name") or "" for r in v.get("reviewRequests") or [])
         line = f"{state_}{' · draft' if v.get('isDraft') else ''}{' · aprobado' if v.get('reviewDecision') == 'APPROVED' else ''}"
@@ -1574,7 +1578,7 @@ def feed_github(state: dict, now: float) -> list[dict]:
                               "url": v.get("url"),
                           }))
         st.setdefault("pending_prs", {})[ref] = {
-            "sig": sig, "updated": v.get("updatedAt"), "open": state_ == "open", "requested": requested, "seen": now,
+            "sig": sig, "updated": v.get("updatedAt"), "open": state_ == "open", "requested": requested, "seen": now, "v": FEED_GH_V,
         }
 
     # My activity: reviews I gave, comments, PRs opened or merged (not pushes or branches).
