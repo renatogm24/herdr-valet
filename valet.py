@@ -126,6 +126,9 @@ DEFAULTS = {
     # YYYY-MM-DD: three days before, feed sends a note to renew it (scoped tokens last 30 days at most).
     "feed_jira_token_expires": "",
     "feed_backfill_days": 7.0,
+    # auto runs every 10 min; feed asks Jira and GitHub at most every this many minutes (a run that fails is
+    # retried on the next one). `valet.py feed` by hand always runs.
+    "feed_every_min": 10.0,
 }
 
 
@@ -671,7 +674,7 @@ def auto(days: float, dry_run: bool) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             log(f"sync failed: {e}")
         try:
-            feed()
+            feed(force=False)
         except Exception as e:  # noqa: BLE001
             log(f"feed failed: {e}")
     if not herdr_running():
@@ -1605,13 +1608,17 @@ def _note(source_id: str, text: str) -> dict:
     return {"source": "valet", "source_id": source_id, "kind": "note", "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "text": text}
 
 
-def feed(dry_run: bool = False) -> dict:
-    """Send what changed in Jira and GitHub since the last run. State only advances after a 200."""
+def feed(dry_run: bool = False, force: bool = True) -> dict:
+    """Send what changed in Jira and GitHub since the last run. State only advances after a 200.
+    From `auto` (force=False) it runs at most every feed_every_min minutes."""
     if not CONF["sync_url"]:
         return {"skipped": "sync_url not set"}
     state = _sync_state()
     fs = state.setdefault("feed", {})
     now = time.time()
+    # 60 s of slack: the timer fires every ~600 s, not exactly.
+    if not force and now - fs.get("last_ok", 0) < CONF["feed_every_min"] * 60 - 60:
+        return {"skipped": f"ran less than {CONF['feed_every_min']:g} min ago"}
     out: dict = {"jira": 0, "github": 0, "notes": 0, "failed": False}
     events: list[dict] = []
     if CONF["feed_jira_api"] and CONF["feed_jira_email"]:
@@ -1658,6 +1665,7 @@ def feed(dry_run: bool = False) -> dict:
                 del prs[ref]
         if "pending_event_id" in gh:
             gh["event_id"] = gh.pop("pending_event_id")
+        fs["last_ok"] = now
         _save_sync_state(state)
     if events or out.get("jira_error") or out.get("github_error") or out["failed"]:
         log(f"feed: { {k: v for k, v in out.items() if k != 'sample'} }")

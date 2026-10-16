@@ -74,3 +74,4 @@
 # feed_jira_token_file = "~/.config/herdr-valet/jira-token"
 # feed_jira_token_expires = "YYYY-MM-DD"   # 3 days before, feed sends a "renew the token" note
 # feed_backfill_days = 7
+# feed_every_min = 10   # auto runs every 10 min; ask Jira and GitHub at most this often (e.g. 30)
