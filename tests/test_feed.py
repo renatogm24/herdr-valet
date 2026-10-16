@@ -174,5 +174,20 @@ class FeedTest(unittest.TestCase):
         self.assertIn("Jira 401", note[0]["text"])
 
 
+    def test_auto_respects_feed_every_min(self):
+        valet.CONF["feed_github_login"] = ""
+        self.addCleanup(valet.CONF.update, {"feed_every_min": 10.0})
+        valet.CONF["feed_every_min"] = 30.0
+        self.jira.issues = []
+        self.assertEqual(valet.feed(force=False)["jira"], 0)  # first time: runs
+        r = valet.feed(force=False)
+        self.assertIn("skipped", r)  # 10 min later from the timer: too soon
+        self.assertNotIn("skipped", valet.feed())  # by hand: always
+        st = json.loads(valet.SYNC_STATE.read_text())
+        st["feed"]["last_ok"] -= 30 * 60
+        valet.SYNC_STATE.write_text(json.dumps(st))
+        self.assertNotIn("skipped", valet.feed(force=False))  # 30 min later: runs
+
+
 if __name__ == "__main__":
     unittest.main()
