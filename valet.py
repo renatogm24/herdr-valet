@@ -1557,7 +1557,8 @@ def feed_github(state: dict, now: float) -> list[dict]:
         requested = ref in asked
         author_me = ((v.get("author") or {}).get("login") or "") == login
         checks = [c.get("conclusion") or c.get("status") for c in v.get("statusCheckRollup") or []]
-        sig = "|".join(map(str, (state_, v.get("isDraft"), v.get("reviewDecision"), requested, v.get("updatedAt"))))
+        pr_author = (v.get("author") or {}).get("login") or ""
+        sig = "|".join(map(str, (state_, v.get("isDraft"), v.get("reviewDecision"), requested, v.get("updatedAt"), pr_author)))
         if (known or {}).get("sig") == sig:
             st.setdefault("pending_prs", {})[ref] = {**known, "updated": v.get("updatedAt"), "seen": now}
             continue
@@ -1568,7 +1569,7 @@ def feed_github(state: dict, now: float) -> list[dict]:
                               "event": "pr_state", "repo": repo, "number": int(num), "title": v.get("title"),
                               "state": state_, "draft": bool(v.get("isDraft")),
                               "approved": v.get("reviewDecision") == "APPROVED", "author_me": author_me,
-                              "review_requested_me": requested, "reviewers": reviewers,
+                              "review_requested_me": requested, "reviewers": reviewers, "author": pr_author,
                               "checks": "failure" if "FAILURE" in checks else "pending" if any(c in (None, "PENDING", "IN_PROGRESS", "QUEUED") for c in checks) else ("success" if checks else None),
                               "url": v.get("url"),
                           }))
