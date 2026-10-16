@@ -151,6 +151,7 @@ class FeedTest(unittest.TestCase):
         self.assertTrue(states["acme/mine#7"]["author_me"])
         self.assertEqual(states["acme/mine#7"]["reviewers"], "porter")
         self.assertTrue(states["acme/other#12"]["review_requested_me"])
+        self.assertEqual(states["acme/other#12"]["author"], "ana")
         self.assertEqual([e["text"] for e in ev if e["meta"].get("event") == "activity"], ["review approved: acme/x#3 Y"])
         notif = [e for e in ev if e["meta"].get("event") == "notification"]
         self.assertEqual([(n["ref"], n["meta"]["url"]) for n in notif], [("acme/x#3", "https://github.com/acme/x/pull/3")])
