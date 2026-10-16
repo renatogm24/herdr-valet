@@ -209,5 +209,19 @@ class FeedTest(unittest.TestCase):
         self.assertNotIn("skipped", valet.feed(force=False))  # 30 min later: runs
 
 
+class PostTest(unittest.TestCase):
+    def test_network_error_is_a_failed_send_not_a_crash(self):
+        import urllib.error
+        orig = valet.urllib.request.urlopen
+
+        def down(*a, **k):
+            raise urllib.error.URLError("[Errno 65] No route to host")
+
+        valet.urllib.request.urlopen = down
+        self.addCleanup(setattr, valet.urllib.request, "urlopen", orig)
+        valet.CONF["sync_url"] = "http://wb.test/ingest"
+        self.assertEqual(valet._post([{"x": 1}]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
