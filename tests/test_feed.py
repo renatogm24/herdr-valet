@@ -164,6 +164,18 @@ class FeedTest(unittest.TestCase):
         self.assertFalse([c for c in self.gh.calls if c[:2] == ("pr", "view")])
         self.assertEqual(self.events(), [])
 
+        # A new pr_state format (FEED_GH_V) resends every followed PR once, even unchanged.
+        st = json.loads(valet.SYNC_STATE.read_text())
+        for v in st["feed"]["github"]["prs"].values():
+            v.pop("v", None)
+        valet.SYNC_STATE.write_text(json.dumps(st))
+        self.sent.clear()
+        valet.feed()
+        self.assertEqual(sorted(e["ref"] for e in self.events() if e["meta"].get("event") == "pr_state"), ["acme/mine#7", "acme/other#12"])
+        self.sent.clear()
+        valet.feed()
+        self.assertEqual(self.events(), [], "and only once")
+
         # I reviewed #12: it leaves the asked list while open → its state says so.
         self.gh.asked = []
         self.gh.views["acme/other#12"] = view("acme/other", 12, "2099-01-01T13:00:00Z", author="ana")
