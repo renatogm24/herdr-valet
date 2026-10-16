@@ -1246,6 +1246,9 @@ def _post(events: list[dict], agent: str = "valet") -> int:
     except urllib.error.HTTPError as e:
         log(f"sync: HTTP {e.code} {e.read()[:300]!r}")
         return e.code
+    except (urllib.error.URLError, OSError) as e:  # no network, host unreachable, timeout: retried next run
+        log(f"sync: {e}")
+        return 0
 
 
 def _send(events: list[dict], agent: str = "valet") -> bool:
