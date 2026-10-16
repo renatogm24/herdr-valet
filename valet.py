@@ -24,6 +24,8 @@ the full history; the card is just the index.
     valet.py recap <pane_id>         summarize an open session without closing it
     valet.py sync [--dry-run]        send new conversation entries, cards and recaps to sync_url
                                      (auto runs it first; off while sync_url is empty)
+    valet.py feed [--dry-run]        send what changed in your Jira issues and GitHub PRs to sync_url
+                                     (auto runs it after sync; each source off while unconfigured)
     valet.py stats <session_id>      context, compactions and estimated cost of a session
     valet.py delete <session_id>     delete the card (Claude keeps the conversation)
     valet.py config                  the effective configuration
@@ -106,6 +108,24 @@ DEFAULTS = {
     "sync_knowledge_prefix": "knowledge-",
     # On the first run, only conversations that moved in the last N days are sent.
     "sync_backfill_days": 7.0,
+    # `feed` (run by `auto` after sync): what happens in your Jira issues and GitHub pull requests, to the
+    # same sync_url. Only what is yours: assigned, reported or watched issues; your PRs and the reviews
+    # asked of you. Each source is off while its key is empty.
+    # GitHub: through the `gh` CLI, as the account it is logged in with; feed_github_login is that login.
+    "feed_github_login": "",
+    "gh_command": "gh",
+    # Jira Cloud REST with a read-only API token (Basic auth, email:token). feed_jira_api is the base URL:
+    # "https://<site>.atlassian.net" for classic tokens, "https://api.atlassian.com/ex/jira/<cloudId>" for
+    # scoped ones. feed_jira_site builds the browse links. The token goes in feed_jira_token_file.
+    "feed_jira_api": "",
+    "feed_jira_site": "",
+    "feed_jira_email": "",
+    "feed_jira_token_file": str(
+        Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "herdr-valet/jira-token"
+    ),
+    # YYYY-MM-DD: three days before, feed sends a note to renew it (scoped tokens last 30 days at most).
+    "feed_jira_token_expires": "",
+    "feed_backfill_days": 7.0,
 }
 
 
@@ -650,6 +670,10 @@ def auto(days: float, dry_run: bool) -> list[dict]:
             sync()
         except Exception as e:  # noqa: BLE001
             log(f"sync failed: {e}")
+        try:
+            feed()
+        except Exception as e:  # noqa: BLE001
+            log(f"feed failed: {e}")
     if not herdr_running():
         return done
     if not dry_run:
@@ -1207,8 +1231,8 @@ def _card_event(c: dict, kind: str, at: str) -> dict:
     return e
 
 
-def _post(events: list[dict]) -> int:
-    body = json.dumps({"agent": "valet", "host": CONF["sync_host"], "events": events}, ensure_ascii=False).encode()
+def _post(events: list[dict], agent: str = "valet") -> int:
+    body = json.dumps({"agent": agent, "host": CONF["sync_host"], "events": events}, ensure_ascii=False).encode()
     req = urllib.request.Request(
         CONF["sync_url"], data=body, method="POST",
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {sync_token()}"},
@@ -1221,7 +1245,7 @@ def _post(events: list[dict]) -> int:
         return e.code
 
 
-def _send(events: list[dict]) -> bool:
+def _send(events: list[dict], agent: str = "valet") -> bool:
     """POST in chunks. True when every chunk got a 200, or a 400: a payload the receiver rejects
     will not become valid by sending it again, so it is logged and skipped instead of blocking."""
     chunk: list[dict] = []
@@ -1229,7 +1253,7 @@ def _send(events: list[dict]) -> bool:
     for e in [*events, None]:
         n = len(json.dumps(e, ensure_ascii=False)) if e else 0
         if chunk and (e is None or len(chunk) >= SYNC_MAX_EVENTS or size + n > SYNC_MAX_BYTES):
-            status = _post(chunk)
+            status = _post(chunk, agent)
             if status == 400:
                 log(f"sync: {len(chunk)} events rejected (400), skipped")
             elif status != 200:
@@ -1339,6 +1363,307 @@ def sync(dry_run: bool = False) -> dict:
     return out
 
 
+# --------------------------------------------------------------------------- feed
+# Jira and GitHub, to the same webhook as sync: only what is yours. Two kinds of events:
+#   - state ("state" for an issue, "pr_state" for a PR): one per change, with what the receiver needs to
+#     keep a to-do list in step (assigned to me? done? review asked of me? approved?);
+#   - one-line happenings (issue changes and comments, my GitHub activity, notifications) for the timeline.
+# Incremental: Jira by `updated >= -Nm` since the last run, GitHub by remembering each PR's last state.
+# Nothing is written to Jira or GitHub. Secrets are masked like everything sync sends.
+FEED_REASONS = ("review_requested", "mention", "author")
+FEED_ACTIVITY = ("PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent", "IssueCommentEvent")
+
+
+class FeedAuthError(Exception):
+    pass
+
+
+def _iso(ts: str) -> str:
+    """Jira writes "2026-10-06T23:07:12.345-0500"; the receiver wants "-05:00"."""
+    return re.sub(r"([+-]\d\d)(\d\d)$", r"\1:\2", ts) if ts else ts
+
+
+def _adf_text(node) -> str:
+    """Plain text of an Atlassian Document Format body (Jira comments)."""
+    if isinstance(node, dict):
+        if node.get("type") == "text":
+            return node.get("text", "")
+        if node.get("type") == "mention":
+            return (node.get("attrs") or {}).get("text", "")
+        inner = "".join(_adf_text(c) for c in node.get("content") or [])
+        return inner + ("\n" if node.get("type") in ("paragraph", "heading", "listItem") else "")
+    if isinstance(node, list):
+        return "".join(_adf_text(c) for c in node)
+    return str(node or "")
+
+
+def jira_token() -> str:
+    try:
+        return Path(CONF["feed_jira_token_file"]).expanduser().read_text().strip()
+    except OSError:
+        return ""
+
+
+def _jira(method: str, path: str, body: dict | None = None) -> dict:
+    import base64
+
+    auth = base64.b64encode(f"{CONF['feed_jira_email']}:{jira_token()}".encode()).decode()
+    req = urllib.request.Request(
+        CONF["feed_jira_api"].rstrip("/") + path,
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method,
+        headers={"Authorization": f"Basic {auth}", "Accept": "application/json", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise FeedAuthError(f"Jira {e.code}") from e
+        raise
+
+
+def _ev(source: str, source_id: str, kind: str, ts: str, ref: str, title: str, text: str, meta: dict) -> dict:
+    return {
+        "source": source, "source_id": source_id[:300], "kind": kind, "ts": ts, "ref": ref[:300],
+        "title": redact(title)[:500], "text": redact(text)[:SYNC_MAX_TEXT], "meta": _redact_meta(meta),
+    }
+
+
+def feed_jira(state: dict, now: float) -> list[dict]:
+    st = state.setdefault("jira", {})
+    since = st.get("last") or now - CONF["feed_backfill_days"] * 86400
+    minutes = int((now - since) / 60) + 5  # margin: the clocks don't need to agree
+    if "me" not in st:
+        st["me"] = _jira("GET", "/rest/api/3/myself").get("accountId")
+    me = st["me"]
+    site = CONF["feed_jira_site"].rstrip("/")
+    jql = (f"(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) "
+           f"AND updated >= -{minutes}m ORDER BY updated ASC")
+    issues, token = [], None
+    while True:
+        body = {"jql": jql, "fields": ["summary", "status", "issuetype", "assignee", "updated"], "maxResults": 100}
+        if token:
+            body["nextPageToken"] = token
+        r = _jira("POST", "/rest/api/3/search/jql", body)
+        issues += r.get("issues") or []
+        token = r.get("nextPageToken")
+        if not token or r.get("isLast", True):
+            break
+    since_iso = datetime.fromtimestamp(since - 300, timezone.utc).isoformat()
+    events = []
+    for it in issues:
+        key, f = it["key"], it.get("fields") or {}
+        status = f.get("status") or {}
+        summary = f.get("summary") or key
+        url = f"{site}/browse/{key}" if site else ""
+        title = f"{key} {summary}"
+        updated = _iso(f.get("updated") or "")
+        events.append(_ev("jira", f"{key}/state/{updated}", "jira", updated, key, title,
+                          f"{key} · {(f.get('issuetype') or {}).get('name', '')} · {status.get('name', '')}", {
+                              "event": "state", "key": key, "summary": summary,
+                              "type": (f.get("issuetype") or {}).get("name"), "status": status.get("name"),
+                              "category": (status.get("statusCategory") or {}).get("key"),
+                              "assignee_me": bool(me) and ((f.get("assignee") or {}).get("accountId") == me),
+                              "url": url,
+                          }))
+        full = _jira("GET", f"/rest/api/3/issue/{key}?expand=changelog&fields=comment")
+        for h in (full.get("changelog") or {}).get("histories") or []:
+            at = _iso(h.get("created") or "")
+            if not at or datetime.fromisoformat(at) < datetime.fromisoformat(since_iso):
+                continue
+            who = (h.get("author") or {}).get("displayName", "")
+            for i, ch in enumerate(h.get("items") or []):
+                text = f"{ch.get('field')}: {ch.get('fromString') or '—'} → {ch.get('toString') or '—'}"
+                events.append(_ev("jira", f"{key}/log/{h.get('id')}/{i}", "jira", at, key, title, f"{who}: {text}" if who else text,
+                                  {"event": "change", "key": key, "author": who, "field": ch.get("field"), "url": url}))
+        for c in ((full.get("fields") or {}).get("comment") or {}).get("comments") or []:
+            at = _iso(c.get("updated") or c.get("created") or "")
+            if not at or datetime.fromisoformat(at) < datetime.fromisoformat(since_iso):
+                continue
+            who = (c.get("author") or {}).get("displayName", "")
+            body = _adf_text(c.get("body")).strip()
+            events.append(_ev("jira", f"{key}/comment/{c.get('id')}/{at}", "jira", at, key, title, f"{who}: {body[:4000]}", {
+                "event": "comment", "key": key, "author": who,
+                "mine": (c.get("author") or {}).get("accountId") == me, "url": url,
+            }))
+    st["pending_last"] = now
+    return events
+
+
+def _gh(*args: str) -> object:
+    out = subprocess.run([*shlex.split(CONF["gh_command"]), *args], capture_output=True, text=True, timeout=120)
+    if out.returncode != 0:
+        raise RuntimeError(f"gh {' '.join(args[:3])}: {out.stderr.strip()[:300]}")
+    return json.loads(out.stdout or "null")
+
+
+PR_FIELDS = "number,title,repository,updatedAt,isDraft,url,state"
+
+
+def _pr_ref(p: dict) -> str:
+    repo = (p.get("repository") or {}).get("nameWithOwner") or ""
+    return f"{repo}#{p['number']}"
+
+
+def _html_url(api_url: str) -> str:
+    """https://api.github.com/repos/o/r/pulls/12 → https://github.com/o/r/pull/12"""
+    m = re.match(r"https://api\.github\.com/repos/([^/]+/[^/]+)/(pulls|issues)/(\d+)", api_url or "")
+    return f"https://github.com/{m.group(1)}/{'pull' if m.group(2) == 'pulls' else 'issues'}/{m.group(3)}" if m else ""
+
+
+def feed_github(state: dict, now: float) -> list[dict]:
+    st = state.setdefault("github", {})
+    login = CONF["feed_github_login"]
+    since = st.get("last") or now - CONF["feed_backfill_days"] * 86400
+    day = datetime.fromtimestamp(since - 86400, timezone.utc).strftime("%Y-%m-%d")
+    mine = {_pr_ref(p): p for p in _gh("search", "prs", "--author", "@me", "--state", "open", "--json", PR_FIELDS, "--limit", "50")}
+    asked = {_pr_ref(p): p for p in _gh("search", "prs", "--review-requested", "@me", "--state", "open", "--json", PR_FIELDS, "--limit", "50")}
+    merged = {_pr_ref(p): p for p in _gh("search", "prs", "--author", "@me", "--merged", "--merged-at", f">={day}", "--json", PR_FIELDS, "--limit", "50")}
+    prev = st.setdefault("prs", {})
+    events = []
+    # Every PR I know: open ones are followed until they close (their final state closes the receiver's
+    # to-do); closed ones are remembered for a while so the merged list does not fetch them again.
+    refs = set(mine) | set(asked) | set(merged) | {r for r, v in prev.items() if v.get("open")}
+    for ref in sorted(refs):
+        repo, _, num = ref.rpartition("#")
+        p = mine.get(ref) or asked.get(ref) or merged.get(ref)
+        known = prev.get(ref)
+        if p and known and known.get("updated") == p.get("updatedAt") and known.get("requested") == (ref in asked):
+            continue  # nothing changed since it was sent
+        v = _gh("pr", "view", num, "--repo", repo, "--json",
+                "number,title,url,state,isDraft,updatedAt,reviewDecision,reviewRequests,statusCheckRollup,author")
+        state_ = (v.get("state") or "").lower()  # open | merged | closed
+        requested = ref in asked
+        author_me = ((v.get("author") or {}).get("login") or "") == login
+        checks = [c.get("conclusion") or c.get("status") for c in v.get("statusCheckRollup") or []]
+        sig = "|".join(map(str, (state_, v.get("isDraft"), v.get("reviewDecision"), requested, v.get("updatedAt"))))
+        if (known or {}).get("sig") == sig:
+            st.setdefault("pending_prs", {})[ref] = {**known, "updated": v.get("updatedAt"), "seen": now}
+            continue
+        reviewers = ", ".join(r.get("login") or r.get("name") or "" for r in v.get("reviewRequests") or [])
+        line = f"{state_}{' · draft' if v.get('isDraft') else ''}{' · aprobado' if v.get('reviewDecision') == 'APPROVED' else ''}"
+        events.append(_ev("github", f"pr/{ref}/state/{v.get('updatedAt')}/{sig}", "github", v.get("updatedAt") or "", ref,
+                          f"{ref} {v.get('title', '')}", f"PR {ref}: {line}", {
+                              "event": "pr_state", "repo": repo, "number": int(num), "title": v.get("title"),
+                              "state": state_, "draft": bool(v.get("isDraft")),
+                              "approved": v.get("reviewDecision") == "APPROVED", "author_me": author_me,
+                              "review_requested_me": requested, "reviewers": reviewers,
+                              "checks": "failure" if "FAILURE" in checks else "pending" if any(c in (None, "PENDING", "IN_PROGRESS", "QUEUED") for c in checks) else ("success" if checks else None),
+                              "url": v.get("url"),
+                          }))
+        st.setdefault("pending_prs", {})[ref] = {
+            "sig": sig, "updated": v.get("updatedAt"), "open": state_ == "open", "requested": requested, "seen": now,
+        }
+
+    # My activity: reviews I gave, comments, PRs opened or merged (not pushes or branches).
+    if login:
+        last_id = int(st.get("event_id") or 0)
+        top = last_id
+        for e in _gh("api", f"users/{login}/events?per_page=100") or []:
+            eid = int(e.get("id") or 0)
+            if eid <= last_id or e.get("type") not in FEED_ACTIVITY:
+                top = max(top, eid)
+                continue
+            top = max(top, eid)
+            pl, repo = e.get("payload") or {}, (e.get("repo") or {}).get("name", "")
+            pr = pl.get("pull_request") or pl.get("issue") or {}
+            ref = f"{repo}#{pr.get('number')}" if pr.get("number") else repo
+            what = {
+                "PullRequestEvent": f"{'mergeé' if pl.get('action') == 'closed' and pr.get('merged') else pl.get('action')} el PR",
+                "PullRequestReviewEvent": f"review {((pl.get('review') or {}).get('state') or '').lower()}",
+                "PullRequestReviewCommentEvent": "comenté en la review",
+                "IssueCommentEvent": "comenté",
+            }[e["type"]]
+            body = ((pl.get("comment") or pl.get("review") or {}).get("body") or "").strip()
+            text = f"{what}: {ref} {pr.get('title', '')}" + (f" — {body[:500]}" if body else "")
+            events.append(_ev("github", f"event/{eid}", "github", e.get("created_at") or "", ref, f"{ref} {pr.get('title', '')}", text, {
+                "event": "activity", "type": e["type"], "repo": repo, "number": pr.get("number"),
+                "url": pr.get("html_url") or "",
+            }))
+        st["pending_event_id"] = top
+
+    # Notifications: review asked, mentions, my own threads.
+    since_iso = datetime.fromtimestamp(since - 300, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for n in _gh("api", f"notifications?all=true&since={since_iso}&per_page=50") or []:
+        if n.get("reason") not in FEED_REASONS:
+            continue
+        subj, repo = n.get("subject") or {}, (n.get("repository") or {}).get("full_name", "")
+        url = _html_url(subj.get("url") or "")
+        num = url.rsplit("/", 1)[-1] if url else ""
+        ref = f"{repo}#{num}" if num else repo
+        events.append(_ev("github", f"notif/{n.get('id')}/{n.get('updated_at')}", "github", n.get("updated_at") or "", ref,
+                          f"{ref} {subj.get('title', '')}", f"{n['reason']}: {subj.get('title', '')}", {
+                              "event": "notification", "reason": n["reason"], "repo": repo, "url": url,
+                          }))
+    st["pending_last"] = now
+    return events
+
+
+def _note(source_id: str, text: str) -> dict:
+    """A note to myself in Work Brain (it becomes a to-do there)."""
+    return {"source": "valet", "source_id": source_id, "kind": "note", "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"), "text": text}
+
+
+def feed(dry_run: bool = False) -> dict:
+    """Send what changed in Jira and GitHub since the last run. State only advances after a 200."""
+    if not CONF["sync_url"]:
+        return {"skipped": "sync_url not set"}
+    state = _sync_state()
+    fs = state.setdefault("feed", {})
+    now = time.time()
+    out: dict = {"jira": 0, "github": 0, "notes": 0, "failed": False}
+    events: list[dict] = []
+    if CONF["feed_jira_api"] and CONF["feed_jira_email"]:
+        exp = CONF["feed_jira_token_expires"]
+        if exp and (datetime.fromisoformat(exp).date() - datetime.now().date()).days <= 3:
+            events.append(_note(f"feed/jira-token/{exp}", f"Renovar el token de Jira de herdr-valet feed: vence el {exp}. Crear uno nuevo de solo lectura (read:jira-work, read:jira-user), guardarlo en {CONF['feed_jira_token_file']} y actualizar feed_jira_token_expires."))
+        if not jira_token():
+            out["jira_error"] = "no token"
+        else:
+            try:
+                j = feed_jira(fs, now)
+                events += j
+                out["jira"] = len(j)
+            except FeedAuthError as e:
+                out["jira_error"] = str(e)
+                events.append(_note(f"feed/jira-auth/{datetime.now().date()}", f"El feed de Jira de herdr-valet falló con {e}: el token venció o fue revocado. Crear uno nuevo y guardarlo en {CONF['feed_jira_token_file']}."))
+            except Exception as e:  # noqa: BLE001 — Jira down does not stop GitHub
+                out["jira_error"] = str(e)[:300]
+    if CONF["feed_github_login"]:
+        try:
+            g = feed_github(fs, now)
+            events += g
+            out["github"] = len(g)
+        except Exception as e:  # noqa: BLE001
+            out["github_error"] = str(e)[:300]
+    out["notes"] = sum(e["kind"] == "note" for e in events)
+    if dry_run:
+        out["sample"] = events[:20]
+        return out
+    if events and not _send(events, agent="feed"):
+        out["failed"] = True
+    else:
+        # Commit what was sent: next run starts from here.
+        for src in ("jira", "github"):
+            s = fs.get(src) or {}
+            if "pending_last" in s:
+                s["last"] = s.pop("pending_last")
+        gh = fs.get("github") or {}
+        if "pending_prs" in gh:
+            prs = gh.setdefault("prs", {})
+            prs.update(gh.pop("pending_prs"))
+            # Closed PRs are only remembered so they are not fetched again; after 10 days they go.
+            for ref in [r for r, v in prs.items() if not v.get("open") and v.get("seen", 0) < time.time() - 10 * 86400]:
+                del prs[ref]
+        if "pending_event_id" in gh:
+            gh["event_id"] = gh.pop("pending_event_id")
+        _save_sync_state(state)
+    if events or out.get("jira_error") or out.get("github_error") or out["failed"]:
+        log(f"feed: { {k: v for k, v in out.items() if k != 'sample'} }")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1366,6 +1691,7 @@ def main() -> int:
     co.add_argument("--keep", action="store_true", help="leave the old session open")
     sub.add_parser("recap").add_argument("pane_id")
     sub.add_parser("sync").add_argument("--dry-run", action="store_true")
+    sub.add_parser("feed").add_argument("--dry-run", action="store_true")
     sub.add_parser("config")
     args = ap.parse_args()
 
@@ -1431,6 +1757,11 @@ def main() -> int:
     elif args.cmd == "sync":
         r = sync(args.dry_run)
         print(json.dumps(r))
+        if r.get("failed"):
+            return 1
+    elif args.cmd == "feed":
+        r = feed(args.dry_run)
+        print(json.dumps(r, ensure_ascii=False, indent=1 if args.dry_run else None))
         if r.get("failed"):
             return 1
     elif args.cmd == "stats":
