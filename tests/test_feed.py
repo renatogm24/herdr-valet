@@ -29,6 +29,8 @@ class FakeJira:
         self.calls = []
         self.issues = []
         self.standing = []
+        self.epics = []
+        self.team, self.team_standing = [], []
         self.full = {}
 
     def __call__(self, method, path, body=None):
@@ -36,7 +38,12 @@ class FakeJira:
         if path == "/rest/api/3/myself":
             return {"accountId": ME}
         if path == "/rest/api/3/search/jql":
-            if "updated >=" not in body["jql"]:
+            jql = body["jql"]
+            if jql.startswith("type = Epic"):
+                return {"issues": self.epics}
+            if jql.startswith("parent in"):
+                return {"issues": self.team if "updated >=" in jql else self.team_standing, "isLast": True}
+            if "updated >=" not in jql:
                 return {"issues": self.standing}
             return {"issues": self.issues, "isLast": True}
         key = path.split("/issue/")[1].split("?")[0]
@@ -134,6 +141,36 @@ class FeedTest(unittest.TestCase):
         self.assertEqual([(e["ref"], e["meta"]["event"]) for e in self.events()], [("ABC-7", "state")])
         self.assertFalse([c for c in self.jira.calls if "/issue/" in c[1]])
         self.assertIn("assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()", jql)
+
+    def test_jira_team_stories_of_followed_epics(self):
+        epic = {"key": "ABC-100", "fields": {"summary": "Retire the old API", "updated": "2099-01-02T09:00:00.000-0500",
+                                             "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+                                             "issuetype": {"name": "Epic"}, "assignee": {"accountId": "acc-juan", "displayName": "Juan Pérez"}}}
+        story = {"key": "ABC-101", "fields": {"summary": "Rotate secrets", "updated": "2099-01-02T10:00:00.000-0500",
+                                              "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
+                                              "issuetype": {"name": "Story"}, "assignee": {"accountId": "acc-juan", "displayName": "Juan Pérez"},
+                                              "parent": {"key": "ABC-100", "fields": {"summary": "Retire the old API", "issuetype": {"name": "Epic"}}}}}
+        quiet = {"key": "ABC-102", "fields": {"summary": "Clean DNS", "updated": "2000-01-01T00:00:00.000+0000",
+                                              "status": {"name": "To Do", "statusCategory": {"key": "new"}},
+                                              "issuetype": {"name": "Story"}, "assignee": None,
+                                              "parent": {"key": "ABC-100", "fields": {"issuetype": {"name": "Epic"}}}}}
+        self.jira.epics = [epic]
+        self.jira.team = [story]
+        self.jira.team_standing = [story, quiet]
+        self.jira.full["ABC-101"] = {"changelog": {"histories": [{"id": "5", "created": "2099-01-02T10:00:00.000-0500", "author": {"displayName": "Juan Pérez", "accountId": "acc-juan"},
+                                                                  "items": [{"field": "status", "fromString": "To Do", "toString": "In Progress"}]}]}, "fields": {}}
+        valet.feed()
+        ev = self.events()
+        states = {e["ref"]: e["meta"] for e in ev if e["meta"]["event"] == "state"}
+        self.assertEqual(sorted(states), ["ABC-100", "ABC-101", "ABC-102"], "the Epic and its stories, whoever owns them")
+        self.assertTrue(states["ABC-100"]["followed"])
+        self.assertEqual((states["ABC-101"]["assignee"], states["ABC-101"]["assignee_me"], states["ABC-101"]["parent_key"]), ("Juan Pérez", False, "ABC-100"))
+        self.assertIsNone(states["ABC-102"].get("assignee"), "unassigned: no assignee")
+        change = next(e for e in ev if e["meta"]["event"] == "change")
+        self.assertEqual((change["meta"]["by"], change["meta"]["by_me"], change["meta"]["to"], change["meta"]["parent_key"]), ("Juan Pérez", False, "In Progress", "ABC-100"))
+        jqls = [c[2]["jql"] for c in self.jira.calls if c[2]]
+        self.assertIn("parent in (ABC-100) AND statusCategory != Done", jqls)
+        self.assertFalse([c for c in self.jira.calls if "/issue/ABC-102" in c[1]], "a quiet story: state only")
 
     def test_github_only_what_changed_and_final_state(self):
         self.gh.mine = [pr("acme/mine", 7, "2099-01-01T10:00:00Z")]
