@@ -51,6 +51,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,6 +126,9 @@ DEFAULTS = {
     ),
     # YYYY-MM-DD: three days before, feed sends a note to renew it (scoped tokens last 30 days at most).
     "feed_jira_token_expires": "",
+    # Granola (meeting notes): the personal API key in feed_granola_key_file. No file = Granola off.
+    "feed_granola_api": "https://public-api.granola.ai",
+    "feed_granola_key_file": str(HOME / ".config/work-brain/granola-key"),
     "feed_backfill_days": 7.0,
     # auto runs every 10 min; feed asks Jira and GitHub at most every this many minutes (a run that fails is
     # retried on the next one). `valet.py feed` by hand always runs.
@@ -1544,6 +1548,132 @@ def feed_jira(state: dict, now: float) -> list[dict]:
     return events
 
 
+class GranolaHTTPError(Exception):
+    def __init__(self, code: int):
+        super().__init__(f"Granola {code}")
+        self.code = code
+
+
+def granola_key() -> str:
+    try:
+        return Path(CONF["feed_granola_key_file"]).expanduser().read_text().strip()
+    except OSError:
+        return ""
+
+
+def _granola(path: str, params: dict | None = None) -> dict:
+    q = f"?{urllib.parse.urlencode(params)}" if params else ""
+    req = urllib.request.Request(CONF["feed_granola_api"].rstrip("/") + path + q,
+                                 headers={"Authorization": f"Bearer {granola_key()}", "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise FeedAuthError(f"Granola {e.code}") from e
+        raise GranolaHTTPError(e.code) from e
+
+
+def _granola_next_steps(md: str) -> list[str]:
+    """The lines under "# Next Steps" (any heading level), as they come: the format depends on the note template."""
+    out, inside = [], False
+    for line in (md or "").splitlines():
+        if re.match(r"^#{1,6}\s", line):
+            inside = bool(re.match(r"^#{1,6}\s*next steps\b", line, re.I))
+            continue
+        if inside and line.strip():
+            out.append(line.rstrip())
+    return out
+
+
+def _granola_transcript(note_id: str, note: dict) -> list[dict]:
+    """The whole transcript: inline when it fits, paged (100 per page) when the note is too large (413)."""
+    if note.get("transcript") is not None:
+        return note["transcript"]
+    items, cursor = [], None
+    while True:
+        params = {"page_size": 100, **({"cursor": cursor} if cursor else {})}
+        r = _granola(f"/v1/notes/{note_id}/transcript", params)
+        items += r.get("transcript") or []
+        cursor = r.get("cursor")
+        if not r.get("hasMore") or not cursor:
+            return items
+
+
+def _clock(iso_ts: str) -> str:
+    try:
+        return datetime.fromisoformat(iso_ts.replace("Z", "+00:00")).astimezone().strftime("%H:%M:%S")
+    except ValueError:
+        return "??:??:??"
+
+
+def feed_granola(state: dict, now: float) -> list[dict]:
+    """Meetings: each note changed since the last run, with its summary, my notes and the whole transcript.
+    Two events per meeting (ref = the note id): `meeting` (one per version) and `meeting_transcript` (once).
+    A note still being generated (404) stops the run there, so the cursor never passes it."""
+    st = state.setdefault("granola", {})
+    since = st.get("last") or datetime.fromtimestamp(now - CONF["feed_backfill_days"] * 86400, timezone.utc).isoformat()
+    notes, cursor = [], None
+    while True:
+        params = {"updated_after": since, "page_size": 30, **({"cursor": cursor} if cursor else {})}
+        r = _granola("/v1/notes", params)
+        notes += r.get("notes") or []
+        cursor = r.get("cursor")
+        if not r.get("hasMore") or not cursor:
+            break
+    events, last = [], since
+    for n in sorted(notes, key=lambda x: x.get("updated_at") or ""):
+        nid = n["id"]
+        try:
+            try:
+                note = _granola(f"/v1/notes/{nid}", {"include": "transcript"})
+            except GranolaHTTPError as e:
+                if e.code != 413:
+                    raise
+                note = _granola(f"/v1/notes/{nid}")
+            transcript = _granola_transcript(nid, note)
+        except GranolaHTTPError as e:
+            if e.code in (404, 429):
+                break  # still generating, or rate limited: next run picks up from here
+            raise
+        updated = note.get("updated_at") or n.get("updated_at") or ""
+        title = note.get("title") or (note.get("calendar_event") or {}).get("event_title") or "Reunión"
+        cal = note.get("calendar_event") or {}
+        start = cal.get("scheduled_start_time") or (transcript[0].get("start_time") if transcript else note.get("created_at"))
+        end = cal.get("scheduled_end_time") or (transcript[-1].get("end_time") if transcript else None)
+        speakers = sorted({(t.get("speaker") or {}).get("name") for t in transcript
+                           if (t.get("speaker") or {}).get("attribution") != "me" and (t.get("speaker") or {}).get("name")})
+        summary = note.get("summary_markdown") or note.get("summary_text") or ""
+        mine = note.get("private_notes_markdown") or note.get("private_notes_text") or ""
+        text = summary + (f"\n\n# Mis notas\n\n{mine}" if mine.strip() else "")
+        events.append(_ev("granola", f"{nid}/note/{updated}", "meeting", start or updated, nid, title, text or title, {
+            "title": title, "web_url": note.get("web_url"), "owner": (note.get("owner") or {}).get("name"),
+            "created_at": note.get("created_at"), "updated_at": updated, "start": start, "end": end,
+            "attendees": [a.get("name") or a.get("email") for a in note.get("attendees") or []],
+            "speakers": speakers, "calendar_title": cal.get("event_title"),
+            "invitees": [i.get("email") for i in cal.get("invitees") or [] if i.get("email")],
+            "folders": [f.get("name") for f in note.get("folder_membership") or [] if f.get("name")],
+            "next_steps": _granola_next_steps(summary),
+        }))
+        if transcript:
+            lines, me_chars, them_chars = [], 0, 0
+            for t in transcript:
+                sp = t.get("speaker") or {}
+                me = sp.get("attribution") == "me"
+                txt = (t.get("text") or "").strip()
+                if me:
+                    me_chars += len(txt)
+                else:
+                    them_chars += len(txt)
+                who = sp.get("name") or ("Yo" if me else "Alguien")
+                lines.append(f"[{_clock(t.get('start_time') or '')}] {who} ({'yo' if me else 'ellos'}): {txt}")
+            events.append(_ev("granola", f"{nid}/transcript", "meeting_transcript", start or updated, nid, title,
+                              "\n".join(lines), {"title": title, "segments": len(transcript), "me_chars": me_chars, "them_chars": them_chars}))
+        last = max(last, updated)
+    st["pending_last"] = last
+    return events
+
+
 def _gh(*args: str) -> object:
     out = subprocess.run([*shlex.split(CONF["gh_command"]), *args], capture_output=True, text=True, timeout=120)
     if out.returncode != 0:
@@ -1663,7 +1793,7 @@ def _note(source_id: str, text: str) -> dict:
 
 
 def feed(dry_run: bool = False, force: bool = True) -> dict:
-    """Send what changed in Jira and GitHub since the last run. State only advances after a 200.
+    """Send what changed in Jira, GitHub and Granola since the last run. State only advances after a 200.
     From `auto` (force=False) it runs at most every feed_every_min minutes."""
     if not CONF["sync_url"]:
         return {"skipped": "sync_url not set"}
@@ -1691,6 +1821,16 @@ def feed(dry_run: bool = False, force: bool = True) -> dict:
                 events.append(_note(f"feed/jira-auth/{datetime.now().date()}", f"El feed de Jira de herdr-valet falló con {e}: el token venció o fue revocado. Crear uno nuevo y guardarlo en {CONF['feed_jira_token_file']}."))
             except Exception as e:  # noqa: BLE001 — Jira down does not stop GitHub
                 out["jira_error"] = str(e)[:300]
+    if granola_key():
+        try:
+            m = feed_granola(fs, now)
+            events += m
+            out["granola"] = sum(e["kind"] == "meeting" for e in m)
+        except FeedAuthError as e:
+            out["granola_error"] = str(e)
+            events.append(_note(f"feed/granola-auth/{datetime.now().date()}", f"El feed de Granola de herdr-valet falló con {e}: la key se revocó. Crear una nueva (Granola → Settings → API → Personal API keys) y guardarla en {CONF['feed_granola_key_file']}."))
+        except Exception as e:  # noqa: BLE001 — Granola down does not stop the rest
+            out["granola_error"] = str(e)[:300]
     if CONF["feed_github_login"]:
         try:
             g = feed_github(fs, now)
@@ -1706,7 +1846,7 @@ def feed(dry_run: bool = False, force: bool = True) -> dict:
         out["failed"] = True
     else:
         # Commit what was sent: next run starts from here.
-        for src in ("jira", "github"):
+        for src in ("jira", "github", "granola"):
             s = fs.get(src) or {}
             if "pending_last" in s:
                 s["last"] = s.pop("pending_last")
@@ -1721,7 +1861,7 @@ def feed(dry_run: bool = False, force: bool = True) -> dict:
             gh["event_id"] = gh.pop("pending_event_id")
         fs["last_ok"] = now
         _save_sync_state(state)
-    if events or out.get("jira_error") or out.get("github_error") or out["failed"]:
+    if events or out.get("jira_error") or out.get("github_error") or out.get("granola_error") or out["failed"]:
         log(f"feed: { {k: v for k, v in out.items() if k != 'sample'} }")
     return out
 
