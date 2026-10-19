@@ -231,6 +231,8 @@ class FeedTest(unittest.TestCase):
         self.assertEqual((b["meta"]["title"], b["meta"]["start"], b["meta"]["invitees"]), ("Weekly sync", "2099-01-02T11:30:00Z", ["ana@acme.test"]))
         self.assertIn("page two", tb["text"], "413: the transcript comes paged")
         self.assertEqual(valet._sync_state()["feed"]["granola"]["last"], "2099-01-02T12:00:00Z", "cursor stops before the note still generating")
+        first = next(p for path, p in self.granola.calls if path == "/v1/notes")
+        self.assertRegex(first["updated_after"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", "Granola only takes Z, not +00:00")
 
     def test_github_only_what_changed_and_final_state(self):
         self.gh.mine = [pr("acme/mine", 7, "2099-01-01T10:00:00Z")]

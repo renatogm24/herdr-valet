@@ -1612,7 +1612,9 @@ def feed_granola(state: dict, now: float) -> list[dict]:
     Two events per meeting (ref = the note id): `meeting` (one per version) and `meeting_transcript` (once).
     A note still being generated (404) stops the run there, so the cursor never passes it."""
     st = state.setdefault("granola", {})
-    since = st.get("last") or datetime.fromtimestamp(now - CONF["feed_backfill_days"] * 86400, timezone.utc).isoformat()
+    # Granola only takes UTC as "Z" (an offset like +00:00 is a 400). The cursor is its own updated_at, already in Z.
+    since = st.get("last") or datetime.fromtimestamp(now - CONF["feed_backfill_days"] * 86400, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    since = since.replace("+00:00", "Z")
     notes, cursor = [], None
     while True:
         params = {"updated_after": since, "page_size": 30, **({"cursor": cursor} if cursor else {})}
