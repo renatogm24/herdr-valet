@@ -1379,8 +1379,9 @@ def sync(dry_run: bool = False) -> dict:
 FEED_REASONS = ("review_requested", "mention", "author")
 # Version of the pr_state fields: bump it when they change and every followed PR is resent once with them.
 FEED_GH_V = 2  # 2: author
-# Jira state format: bump to resend each issue's state once (v2 = parent, so the receiver files a story under its Epic).
-FEED_JIRA_V = 2
+# Jira state format: bump to resend each issue's state once (v2 = parent, so the receiver files a story under its Epic;
+# v3 = assignee name and followed, for the team's stories in my Epics).
+FEED_JIRA_V = 3  # 3: assignee name + followed (team stories of my Epics)
 FEED_PR_ACTIONS = ("opened", "closed", "reopened", "ready_for_review")
 FEED_ACTIVITY = ("PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent", "IssueCommentEvent")
 
@@ -1441,6 +1442,22 @@ def _ev(source: str, source_id: str, kind: str, ts: str, ref: str, title: str, t
     }
 
 
+JIRA_FIELDS = ["summary", "status", "issuetype", "assignee", "updated", "parent"]
+
+
+def _jira_search(jql: str) -> list[dict]:
+    issues, token = [], None
+    while True:
+        body = {"jql": jql, "fields": JIRA_FIELDS, "maxResults": 100}
+        if token:
+            body["nextPageToken"] = token
+        r = _jira("POST", "/rest/api/3/search/jql", body)
+        issues += r.get("issues") or []
+        token = r.get("nextPageToken")
+        if not token or r.get("isLast", True):
+            return issues
+
+
 def feed_jira(state: dict, now: float) -> list[dict]:
     st = state.setdefault("jira", {})
     since = st.get("last") or now - CONF["feed_backfill_days"] * 86400
@@ -1449,47 +1466,52 @@ def feed_jira(state: dict, now: float) -> list[dict]:
         st["me"] = _jira("GET", "/rest/api/3/myself").get("accountId")
     me = st["me"]
     site = CONF["feed_jira_site"].rstrip("/")
-    jql = (f"(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) "
-           f"AND updated >= -{minutes}m ORDER BY updated ASC")
-    issues, token = [], None
-    while True:
-        body = {"jql": jql, "fields": ["summary", "status", "issuetype", "assignee", "updated", "parent"], "maxResults": 100}
-        if token:
-            body["nextPageToken"] = token
-        r = _jira("POST", "/rest/api/3/search/jql", body)
-        issues += r.get("issues") or []
-        token = r.get("nextPageToken")
-        if not token or r.get("isLast", True):
-            break
+    # What changed and involves me: state + changelog + comments.
+    issues = _jira_search(f"(assignee = currentUser() OR reporter = currentUser() OR watcher = currentUser()) "
+                          f"AND updated >= -{minutes}m ORDER BY updated ASC")
     # My open assigned issues, changed or not: the receiver keeps them as to-dos, and one that did not move in
     # the backfill window would never arrive otherwise. Only their state (same source_id = no duplicate there).
-    seen = {it["key"] for it in issues}
-    r = _jira("POST", "/rest/api/3/search/jql", {"jql": "assignee = currentUser() AND statusCategory != Done",
-                                                   "fields": ["summary", "status", "issuetype", "assignee", "updated", "parent"], "maxResults": 100})
-    standing = [it for it in r.get("issues") or [] if it["key"] not in seen]
+    standing = _jira_search("assignee = currentUser() AND statusCategory != Done")
+    # Epics I follow: assigned to me or watched (supporting someone else's Epic = watch it in Jira). Their stories
+    # arrive whoever owns them, so the receiver knows who is moving what and never suggests a taken story.
+    epics = _jira_search("type = Epic AND (assignee = currentUser() OR watcher = currentUser()) AND statusCategory != Done")
+    epic_keys = sorted({e["key"] for e in epics})
+    team, team_standing = [], []
+    if epic_keys:
+        inside = f"parent in ({', '.join(epic_keys)})"
+        team = _jira_search(f"{inside} AND updated >= -{minutes}m ORDER BY updated ASC")
+        team_standing = _jira_search(f"{inside} AND statusCategory != Done")
+    followed = set(epic_keys)
+    detailed = {it["key"] for it in issues + team}
     since_iso = datetime.fromtimestamp(since - 300, timezone.utc).isoformat()
-    events = []
-    for it in issues + standing:
+    events, emitted = [], set()
+    for it in issues + team + standing + team_standing + epics:
         key, f = it["key"], it.get("fields") or {}
+        if key in emitted:
+            continue
+        emitted.add(key)
         status = f.get("status") or {}
         summary = f.get("summary") or key
         url = f"{site}/browse/{key}" if site else ""
         title = f"{key} {summary}"
         updated = _iso(f.get("updated") or "")
         parent = f.get("parent") or {}
+        assignee = f.get("assignee") or {}
         events.append(_ev("jira", f"{key}/state/{updated}/v{FEED_JIRA_V}", "jira", updated, key, title,
                           f"{key} · {(f.get('issuetype') or {}).get('name', '')} · {status.get('name', '')}", {
                               "event": "state", "key": key, "summary": summary,
                               "type": (f.get("issuetype") or {}).get("name"), "status": status.get("name"),
                               "category": (status.get("statusCategory") or {}).get("key"),
-                              "assignee_me": bool(me) and ((f.get("assignee") or {}).get("accountId") == me),
+                              "assignee_me": bool(me) and (assignee.get("accountId") == me),
+                              "assignee": assignee.get("displayName"),
+                              "followed": key in followed,
                               "url": url,
                               # The Epic (or story, for a sub-task) it belongs to.
                               "parent_key": parent.get("key"),
                               "parent_type": ((parent.get("fields") or {}).get("issuetype") or {}).get("name"),
                               "parent_summary": (parent.get("fields") or {}).get("summary"),
                           }))
-        if key not in seen:
+        if key not in detailed:
             continue  # standing: state only
         full = _jira("GET", f"/rest/api/3/issue/{key}?expand=changelog&fields=comment")
         for h in (full.get("changelog") or {}).get("histories") or []:
@@ -1505,7 +1527,9 @@ def feed_jira(state: dict, now: float) -> list[dict]:
                     continue  # "Done → Done" says nothing
                 text = f"{ch.get('field')}: {ch.get('fromString') or '—'} → {ch.get('toString') or '—'}"
                 events.append(_ev("jira", f"{key}/log/{h.get('id')}/{i}", "jira", at, key, title, f"{who}: {text}" if who else text,
-                                  {"event": "change", "key": key, "by": who, "field": ch.get("field"), "url": url}))
+                                  {"event": "change", "key": key, "by": who, "by_me": author.get("accountId") == me,
+                                   "field": ch.get("field"), "from": ch.get("fromString"), "to": ch.get("toString"),
+                                   "parent_key": parent.get("key"), "url": url}))
         for c in ((full.get("fields") or {}).get("comment") or {}).get("comments") or []:
             at = _iso(c.get("updated") or c.get("created") or "")
             if not at or datetime.fromisoformat(at) < datetime.fromisoformat(since_iso):
@@ -1514,7 +1538,7 @@ def feed_jira(state: dict, now: float) -> list[dict]:
             body = _adf_text(c.get("body")).strip()
             events.append(_ev("jira", f"{key}/comment/{c.get('id')}/{at}", "jira", at, key, title, f"{who}: {body[:4000]}", {
                 "event": "comment", "key": key, "by": who,
-                "mine": (c.get("author") or {}).get("accountId") == me, "url": url,
+                "mine": (c.get("author") or {}).get("accountId") == me, "parent_key": parent.get("key"), "url": url,
             }))
     st["pending_last"] = now
     return events
