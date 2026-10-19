@@ -1379,6 +1379,8 @@ def sync(dry_run: bool = False) -> dict:
 FEED_REASONS = ("review_requested", "mention", "author")
 # Version of the pr_state fields: bump it when they change and every followed PR is resent once with them.
 FEED_GH_V = 2  # 2: author
+# Jira state format: bump to resend each issue's state once (v2 = parent, so the receiver files a story under its Epic).
+FEED_JIRA_V = 2
 FEED_PR_ACTIONS = ("opened", "closed", "reopened", "ready_for_review")
 FEED_ACTIVITY = ("PullRequestEvent", "PullRequestReviewEvent", "PullRequestReviewCommentEvent", "IssueCommentEvent")
 
@@ -1451,7 +1453,7 @@ def feed_jira(state: dict, now: float) -> list[dict]:
            f"AND updated >= -{minutes}m ORDER BY updated ASC")
     issues, token = [], None
     while True:
-        body = {"jql": jql, "fields": ["summary", "status", "issuetype", "assignee", "updated"], "maxResults": 100}
+        body = {"jql": jql, "fields": ["summary", "status", "issuetype", "assignee", "updated", "parent"], "maxResults": 100}
         if token:
             body["nextPageToken"] = token
         r = _jira("POST", "/rest/api/3/search/jql", body)
@@ -1463,7 +1465,7 @@ def feed_jira(state: dict, now: float) -> list[dict]:
     # the backfill window would never arrive otherwise. Only their state (same source_id = no duplicate there).
     seen = {it["key"] for it in issues}
     r = _jira("POST", "/rest/api/3/search/jql", {"jql": "assignee = currentUser() AND statusCategory != Done",
-                                                   "fields": ["summary", "status", "issuetype", "assignee", "updated"], "maxResults": 100})
+                                                   "fields": ["summary", "status", "issuetype", "assignee", "updated", "parent"], "maxResults": 100})
     standing = [it for it in r.get("issues") or [] if it["key"] not in seen]
     since_iso = datetime.fromtimestamp(since - 300, timezone.utc).isoformat()
     events = []
@@ -1474,13 +1476,18 @@ def feed_jira(state: dict, now: float) -> list[dict]:
         url = f"{site}/browse/{key}" if site else ""
         title = f"{key} {summary}"
         updated = _iso(f.get("updated") or "")
-        events.append(_ev("jira", f"{key}/state/{updated}", "jira", updated, key, title,
+        parent = f.get("parent") or {}
+        events.append(_ev("jira", f"{key}/state/{updated}/v{FEED_JIRA_V}", "jira", updated, key, title,
                           f"{key} · {(f.get('issuetype') or {}).get('name', '')} · {status.get('name', '')}", {
                               "event": "state", "key": key, "summary": summary,
                               "type": (f.get("issuetype") or {}).get("name"), "status": status.get("name"),
                               "category": (status.get("statusCategory") or {}).get("key"),
                               "assignee_me": bool(me) and ((f.get("assignee") or {}).get("accountId") == me),
                               "url": url,
+                              # The Epic (or story, for a sub-task) it belongs to.
+                              "parent_key": parent.get("key"),
+                              "parent_type": ((parent.get("fields") or {}).get("issuetype") or {}).get("name"),
+                              "parent_summary": (parent.get("fields") or {}).get("summary"),
                           }))
         if key not in seen:
             continue  # standing: state only

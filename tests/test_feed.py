@@ -93,7 +93,8 @@ class FeedTest(unittest.TestCase):
     def test_jira_state_changes_and_comments(self):
         self.jira.issues = [{"key": "ABC-1", "fields": {"summary": "Fix the retry", "updated": "2099-01-02T10:00:00.000-0500",
                                                         "status": {"name": "In Progress", "statusCategory": {"key": "indeterminate"}},
-                                                        "issuetype": {"name": "Task"}, "assignee": {"accountId": ME}}}]
+                                                        "issuetype": {"name": "Task"}, "assignee": {"accountId": ME},
+                                                        "parent": {"key": "ABC-100", "fields": {"summary": "Retire the old API", "issuetype": {"name": "Epic"}}}}}]
         self.jira.full["ABC-1"] = {
             "changelog": {"histories": [{"id": "9", "created": "2099-01-02T10:00:00.000-0500", "author": {"displayName": "Ana Torres"},
                                          "items": [{"field": "status", "fromString": "To Do", "toString": "In Progress"}]},
@@ -114,6 +115,9 @@ class FeedTest(unittest.TestCase):
         self.assertEqual(state["meta"]["url"], "https://acme.atlassian.net/browse/ABC-1")
         self.assertEqual(state["ts"], "2099-01-02T10:00:00.000-05:00")
         self.assertEqual(state["ref"], "ABC-1")
+        self.assertEqual((state["meta"]["parent_key"], state["meta"]["parent_type"]), ("ABC-100", "Epic"))
+        self.assertTrue(state["source_id"].endswith(f"/v{valet.FEED_JIRA_V}"), "a new format resends the state once")
+        self.assertIn("parent", self.jira.calls[1][2]["fields"])
         self.assertEqual(change["text"], "Ana Torres: status: To Do → In Progress")
         self.assertEqual(change["meta"]["by"], "Ana Torres")
         self.assertEqual(comment["text"], "Leo Paz: Can you check the logs?")
