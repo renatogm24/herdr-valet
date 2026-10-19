@@ -50,6 +50,34 @@ class FakeJira:
         return self.full.get(key, {})
 
 
+class FakeGranola:
+    def __init__(self):
+        self.calls = []
+        self.notes, self.full, self.too_large, self.pending = [], {}, set(), set()
+        self.pages = {}
+
+    def __call__(self, path, params=None):
+        self.calls.append((path, params))
+        if path == "/v1/notes":
+            return {"notes": self.notes, "hasMore": False, "cursor": None}
+        nid = path.split("/")[3]
+        if nid in self.pending:
+            raise valet.GranolaHTTPError(404)
+        if path.endswith("/transcript"):
+            page = (params or {}).get("cursor") or "0"
+            items, nxt = self.pages[nid][int(page)]
+            return {"transcript": items, "hasMore": nxt is not None, "cursor": nxt}
+        if (params or {}).get("include") == "transcript":
+            if nid in self.too_large:
+                raise valet.GranolaHTTPError(413)
+            return self.full[nid]
+        return {k: v for k, v in self.full[nid].items() if k != "transcript"}
+
+
+def seg(t, text, name=None, me=False):
+    return {"text": text, "start_time": t, "end_time": t, "speaker": {"source": "microphone" if me else "speaker", "attribution": "me" if me else "them", **({"name": name} if name else {})}}
+
+
 class FakeGh:
     def __init__(self):
         self.calls = []
@@ -92,6 +120,8 @@ class FeedTest(unittest.TestCase):
         valet.SYNC_STATE.unlink(missing_ok=True)
         self.jira, self.gh, self.sent = FakeJira(), FakeGh(), []
         valet._jira, valet._gh, valet.jira_token = self.jira, self.gh, lambda: "tok"
+        self.granola = FakeGranola()
+        valet._granola, valet.granola_key = self.granola, lambda: ""
         valet._send = lambda events, agent="valet": self.sent.append((agent, events)) or True
 
     def events(self):
@@ -171,6 +201,36 @@ class FeedTest(unittest.TestCase):
         jqls = [c[2]["jql"] for c in self.jira.calls if c[2]]
         self.assertIn("parent in (ABC-100) AND statusCategory != Done", jqls)
         self.assertFalse([c for c in self.jira.calls if "/issue/ABC-102" in c[1]], "a quiet story: state only")
+
+    def test_granola_meetings_with_transcript(self):
+        valet.granola_key = lambda: "gk"
+        self.jira.issues = []
+        summary = "# Team Updates\nPersona B is back.\n\n# Next Steps\n- **Send the SC form** (Rex)\n  by Friday\n- **Review CORS fix** (Ana)\n"
+        self.granola.notes = [{"id": "not_b", "updated_at": "2099-01-02T12:00:00Z"}, {"id": "not_a", "updated_at": "2099-01-02T11:00:00Z"}, {"id": "not_c", "updated_at": "2099-01-02T13:00:00Z"}]
+        self.granola.full["not_a"] = {"id": "not_a", "title": "Edge onboarding", "web_url": "https://notes.granola.ai/d/a", "owner": {"name": "Rex"},
+                                      "created_at": "2099-01-02T10:00:00Z", "updated_at": "2099-01-02T11:00:00Z", "calendar_event": None,
+                                      "attendees": [{"name": "Rex"}], "folder_membership": [], "summary_markdown": summary, "private_notes_markdown": "ask about Jeff",
+                                      "transcript": [seg("2099-01-02T10:00:05Z", "Hi all", "Ana"), seg("2099-01-02T10:00:09Z", "Hello, quick update", me=True), seg("2099-01-02T10:01:00Z", "ok", None)]}
+        self.granola.full["not_b"] = {"id": "not_b", "title": None, "web_url": "https://notes.granola.ai/d/b", "created_at": "2099-01-02T11:30:00Z", "updated_at": "2099-01-02T12:00:00Z",
+                                      "calendar_event": {"event_title": "Weekly sync", "scheduled_start_time": "2099-01-02T11:30:00Z", "scheduled_end_time": "2099-01-02T12:00:00Z", "invitees": [{"email": "ana@acme.test"}]},
+                                      "attendees": [], "summary_markdown": "# Notes\nshort", "transcript": None}
+        self.granola.too_large.add("not_b")
+        self.granola.pages["not_b"] = {0: ([seg("2099-01-02T11:31:00Z", "page one", "Ana")], "1"), 1: ([seg("2099-01-02T11:32:00Z", "page two", me=True)], None)}
+        self.granola.pending.add("not_c")
+        r = valet.feed()
+        self.assertEqual(r["granola"], 2, "not_c is still generating: next run")
+        ev = [e for e in self.events() if e["kind"] in ("meeting", "meeting_transcript")]
+        self.assertEqual([(e["kind"], e["ref"]) for e in ev], [("meeting", "not_a"), ("meeting_transcript", "not_a"), ("meeting", "not_b"), ("meeting_transcript", "not_b")])
+        a, ta, b, tb = ev
+        self.assertEqual(a["source_id"], "not_a/note/2099-01-02T11:00:00Z")
+        self.assertEqual(a["meta"]["next_steps"], ["- **Send the SC form** (Rex)", "  by Friday", "- **Review CORS fix** (Ana)"])
+        self.assertEqual(a["meta"]["speakers"], ["Ana"])
+        self.assertIn("# Mis notas\n\nask about Jeff", a["text"])
+        self.assertRegex(ta["text"], r"\[\d\d:\d\d:\d\d\] Ana \(ellos\): Hi all\n\[\d\d:\d\d:\d\d\] Yo \(yo\): Hello, quick update\n.* Alguien \(ellos\): ok")
+        self.assertEqual((ta["meta"]["me_chars"], ta["meta"]["segments"]), (len("Hello, quick update"), 3))
+        self.assertEqual((b["meta"]["title"], b["meta"]["start"], b["meta"]["invitees"]), ("Weekly sync", "2099-01-02T11:30:00Z", ["ana@acme.test"]))
+        self.assertIn("page two", tb["text"], "413: the transcript comes paged")
+        self.assertEqual(valet._sync_state()["feed"]["granola"]["last"], "2099-01-02T12:00:00Z", "cursor stops before the note still generating")
 
     def test_github_only_what_changed_and_final_state(self):
         self.gh.mine = [pr("acme/mine", 7, "2099-01-01T10:00:00Z")]
