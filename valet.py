@@ -214,6 +214,7 @@ def live_sessions() -> list[dict]:
             sid = pane_session(p["pane_id"], procs) or (p.get("agent_session") or {}).get("value")
             if not sid:
                 continue
+            sid = current_session(sid)
             tr = transcript_path(sid)
             since = active_since(sid, tr)
             rows.append(
@@ -310,7 +311,10 @@ def _same_claude(pid: int, proc_start: str | None) -> bool:
 
 
 def session_owners(session_id: str) -> list[int]:
-    return [int(d["pid"]) for d in claude_processes() if d.get("sessionId") == session_id]
+    """Claude processes writing this conversation: the ones whose sessions file names it, and the
+    ones whose file still names an id the conversation moved on from (see current_session)."""
+    return [int(d["pid"]) for d in claude_processes()
+            if d.get("sessionId") == session_id or (d.get("sessionId") and current_session(d["sessionId"]) == session_id)]
 
 
 def kill_strays(session_id: str) -> list[int]:
@@ -334,6 +338,41 @@ def transcript_path(session_id: str) -> Path | None:
         if hits:
             return Path(hits[0])
     return None
+
+
+CONVERSATION = ("user", "assistant")
+
+
+def current_session(session_id: str, hops: int = 10) -> str:
+    """The id the conversation lives under now. Claude Code can move a running conversation to a
+    new session id without restarting the process: it leaves {"type": "continued-in",
+    "continuedInSessionId": …} in the old transcript and goes on writing the new one, while
+    sessions/<pid>.json keeps the old id (seen 2026-10-16 on CLI 2.1.301, and on /resume). Reading
+    the old transcript, a session in use looks idle for days: on 2026-10-19 auto parked one that
+    had talked 5 minutes before. Follow the latest continued-in whose transcript exists, unless the
+    old transcript got conversation after it (then the old id is the one in use)."""
+    sid = session_id
+    for _ in range(hops):
+        tr = transcript_path(sid)
+        if not tr:
+            break
+        nxt = None
+        for line in reversed(_tail(tr)):
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            kind = d.get("type")
+            if kind in CONVERSATION:
+                break
+            target = d.get("continuedInSessionId") if kind == "continued-in" else None
+            if target and target != sid and transcript_path(target):
+                nxt = target
+                break
+        if not nxt:
+            break
+        sid = nxt
+    return sid
 
 
 def _tail(p: Path) -> list[str]:
@@ -736,6 +775,11 @@ def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
     when one is open, so sessions of one project stay together; otherwise in a new workspace
     named after the project. Returns the workspace id."""
     c = json.loads(card_path(session_id).read_text())
+    # The card may name an id the conversation moved on from: resume where it lives now.
+    target = current_session(session_id)
+    if target != session_id:
+        c = {**c, "session_id": target}
+        log(f"{session_id} continued in {target}: resuming that one")
     if profile:
         check_profile(profile)
     cmd = resume_command(c, profile)
@@ -744,7 +788,7 @@ def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
     if c["cwd"] and not Path(c["cwd"]).is_dir():
         raise ValueError(f"directory no longer exists: {c['cwd']}")
     # A second copy would write to the same transcript as the one still running.
-    owners = session_owners(session_id)
+    owners = session_owners(c["session_id"])
     if owners:
         raise ValueError(f"this session is already running (claude pid {', '.join(map(str, owners))}): "
                          "switch to it in herdr, or stop it before resuming here")
