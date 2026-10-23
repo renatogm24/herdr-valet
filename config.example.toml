@@ -49,6 +49,11 @@
 # continue_command = "claude --model {model} {prompt}"
 # continue_prompt = "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off."
 
+# `fork`: how a copy of an open conversation starts, in a new tab next to it. Same placeholders as
+# resume_command; {model} is the one the session requested. A launcher of yours must pass
+# --fork-session on to claude.
+# fork_command = "claude --resume {session_id} --fork-session --model {model}"
+
 # Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
 # closed_keep_days = 7
 

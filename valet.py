@@ -21,6 +21,11 @@ the full history; the card is just the index.
     valet.py continue <handoff.md> [--from PANE] [--keep]   hand the session over to a fresh one:
                                      a new tab next to it starts Claude on the handoff file, then
                                      the old one is parked (pane from $HERDR_PANE_ID by default)
+    valet.py restart [PANE] [--force]   close Claude and reopen the same conversation in the same
+                                     pane (after an update, to load MCP servers or plugins)
+    valet.py fork [PANE]             open a copy of the conversation in a new tab next to it
+    valet.py park-all [--force] [--dry-run]   park every open session as one batch (before a reboot)
+    valet.py restore [--batch ID]    resume the last batch (park-all or reboot) where it was
     valet.py recap <pane_id>         summarize an open session without closing it
     valet.py sync [--dry-run]        send new conversation entries, cards and recaps to sync_url
                                      (auto runs it first; off while sync_url is empty)
@@ -93,6 +98,10 @@ DEFAULTS = {
     # directory. {prompt}, {model}, {cwd} and {handoff} are substituted (already shell-quoted);
     # {model} is the one the old session requested, "[1m]" included.
     "continue_command": "claude --model {model} {prompt}",
+    # `fork`: a copy of an open conversation, in a new tab next to it, that goes its own way (the
+    # original is left as it is). Same placeholders as resume_command; {model} is the one the
+    # session requested. A launcher of yours must pass --fork-session on to claude.
+    "fork_command": "claude --resume {session_id} --fork-session --model {model}",
     # Its first message. {handoff} is the handoff file's absolute path.
     "continue_prompt": "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off.",
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
@@ -640,6 +649,7 @@ def snapshot() -> list[dict]:
     prev = json.loads(SNAPSHOT.read_text()) if SNAPSHOT.exists() else {}
     recovered = []
     rebooted = prev.get("boot_id") != boot
+    prev_batch = prev.get("taken_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
     alive = {s["session_id"] for s in live}
     panes = {s["pane_id"] for s in live}
     for s in prev.get("sessions", []):
@@ -654,8 +664,10 @@ def snapshot() -> list[dict]:
             if session_owners(sid) or not has_conversation(sid):
                 continue
         reason = "reboot" if rebooted else "closed"
+        # Cut off together by the reboot: `restore` brings them back as one batch, in place.
+        extra = {"batch": prev_batch, "position": s.get("position")} if rebooted else None
         try:
-            recovered.append(write_card(sid, s["label"], s["cwd"], reason))
+            recovered.append(write_card(sid, s["label"], s["cwd"], reason, extra))
             log(f"card for {sid} ({s['label']}, {reason})")
         except Exception as e:  # noqa: BLE001
             log(f"could not write a card for {sid}: {e}")
@@ -666,7 +678,8 @@ def snapshot() -> list[dict]:
                 "boot_id": boot,
                 "taken_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "sessions": [
-                    {"session_id": s["session_id"], "pane_id": s["pane_id"], "label": display_label(s), "cwd": s["cwd"]}
+                    {"session_id": s["session_id"], "pane_id": s["pane_id"], "label": display_label(s), "cwd": s["cwd"],
+                     "position": position(s)}
                     for s in live
                 ],
             },
@@ -677,10 +690,19 @@ def snapshot() -> list[dict]:
     return recovered
 
 
+def position(live: dict) -> list[int | None]:
+    """Where the session sits in herdr's sidebar, [workspace number, tab number]: `restore`
+    reopens a batch in this order."""
+    return [live.get("workspace_number"), live.get("tab_number")]
+
+
 def close_pane(live: dict) -> None:
     info = herdr("pane", "process-info", "--pane", live["pane_id"])["process_info"]
     pids = [p["pid"] for p in info.get("foreground_processes", [])]
-    if live["workspace_panes"] <= 1:
+    # Counted now, not when `live` was read: park-all closes several panes of one workspace in a row.
+    count = next((ws["pane_count"] for ws in herdr("workspace", "list")["workspaces"]
+                  if ws["workspace_id"] == live["workspace_id"]), live["workspace_panes"])
+    if count <= 1:
         herdr("workspace", "close", live["workspace_id"])
     else:
         herdr("pane", "close", live["pane_id"])
@@ -739,12 +761,12 @@ def auto(days: float, dry_run: bool) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- resuming
-def resume_command(c: dict, profile: str | None = None) -> str:
-    """The configured resume command, filled with the card's values (shell-quoted). `profile`
-    overrides the one the session ran with."""
+def resume_command(c: dict, profile: str | None = None, template: str | None = None) -> str:
+    """The configured resume command (or `template`), filled with the card's values (shell-quoted).
+    `profile` overrides the one the session ran with."""
     values = {k: shlex.quote(str(c.get(k) or "")) for k in ("session_id", "cwd", "model")}
     values["profile"] = shlex.quote(profile or c.get("profile") or profile_of(c["session_id"]))
-    cmd = CONF["resume_command"].format(**values)
+    cmd = (template or CONF["resume_command"]).format(**values)
     if c.get("config_dir"):
         cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(c['config_dir'])} {cmd}"
     return cmd
@@ -802,7 +824,11 @@ def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
     else:
         ws = herdr("workspace", "create", "--cwd", cwd, "--label", project, "--no-focus")
         ws_id = ws["workspace"]["workspace_id"]
-        pane = herdr("pane", "list", "--workspace", ws_id)["panes"][0]["pane_id"]
+        first = herdr("pane", "list", "--workspace", ws_id)["panes"][0]
+        pane = first["pane_id"]
+        # The workspace's first tab comes named "1": give it the tab name, like the ones after it.
+        if sub and first.get("tab_id"):
+            herdr("tab", "rename", first["tab_id"], sub)
     herdr("pane", "run", pane, cmd)
     mark_resumed(session_id)
     _PROFILE_CACHE.pop(session_id, None)
@@ -821,6 +847,200 @@ def switch(pane_id: str, profile: str) -> str:
             break
         time.sleep(0.5)
     return resume_in_herdr(sid, profile)
+
+
+# --------------------------------------------------------------------------- restart, fork, park-all
+def open_session(pane_id: str | None) -> dict:
+    """The Claude session open in the pane ($HERDR_PANE_ID by default)."""
+    pane_id = pane_id or os.environ.get("HERDR_PANE_ID")
+    if not pane_id:
+        raise ValueError("which pane? pass one, or run it inside herdr")
+    if not herdr_running():
+        raise HerdrDown("start herdr first")
+    live = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
+    if live is None:
+        raise ValueError(f"no Claude session in pane {pane_id}")
+    return live
+
+
+def launch_values(live: dict) -> dict:
+    """A card-like dict for resume_command: the session as it runs now, with the model it requested."""
+    tr = transcript_path(live["session_id"])
+    config_dir = str(tr.parents[2]) if tr else None
+    return {
+        "session_id": live["session_id"],
+        "cwd": live["cwd"],
+        "model": (requested_model(tr) or last_model(tr)) if tr else "",
+        "config_dir": None if config_dir in (None, str(DEFAULT_CONFIG_DIR)) else config_dir,
+    }
+
+
+def pane_claude(pane_id: str) -> tuple[int | None, list[int]]:
+    """The interactive Claude in the pane's foreground (its pid, or None) and every foreground pid
+    (Claude and the MCP servers it started)."""
+    info = herdr("pane", "process-info", "--pane", pane_id)["process_info"]
+    pids = [fp["pid"] for fp in info.get("foreground_processes", [])]
+    procs = {int(d["pid"]): d for d in claude_processes()}
+    claude = next((pid for pid in pids if pid in procs and procs[pid].get("kind", "interactive") == "interactive"), None)
+    return claude, pids
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def wait_session(pane_id: str, not_pid: int | None = None, wait_s: float = 90) -> str | None:
+    """The session id of the Claude that comes up in the pane (a pid other than `not_pid`)."""
+    deadline = time.time() + wait_s
+    while time.time() < deadline:
+        time.sleep(2)
+        try:
+            pid, _ = pane_claude(pane_id)
+        except (RuntimeError, KeyError, ValueError):
+            continue
+        if pid and pid != not_pid:
+            d = next((d for d in claude_processes() if int(d["pid"]) == pid), None)
+            if d and d.get("sessionId"):
+                return current_session(d["sessionId"])
+    return None
+
+
+def restart(pane_id: str | None = None, force: bool = False) -> dict:
+    """Close Claude and reopen the same conversation in the same pane, so a Claude Code update,
+    MCP servers or plugins load. The tab stays where it is. Refuses a session that is working or
+    waiting for an answer unless `force` (run from inside the session itself, it always is)."""
+    live = open_session(pane_id)
+    pane_id = live["pane_id"]
+    if live["status"] not in QUIET and not force and pane_id != os.environ.get("HERDR_PANE_ID"):
+        raise ValueError(f"{display_label(live)} is {live['status']}: wait for it, or force it")
+    pid, pids = pane_claude(pane_id)
+    if not pid:
+        raise ValueError(f"no interactive Claude in the foreground of {pane_id}")
+    c = launch_values(live)
+    cmd = f"cd {shlex.quote(c['cwd'] or str(HOME))} && {resume_command(c)}"
+    # Claude closes its MCP servers on SIGTERM; the ones that outlive it are in the same group.
+    for p in pids:
+        try:
+            os.kill(p, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    deadline = time.time() + 15
+    while _alive(pid) and time.time() < deadline:
+        time.sleep(0.5)
+    if _alive(pid):
+        os.kill(pid, signal.SIGKILL)
+        time.sleep(1)
+    herdr("pane", "run", pane_id, cmd)
+    new_sid = wait_session(pane_id, not_pid=pid)
+    log(f"restarted {live['session_id']} in {pane_id}" + ("" if new_sid else ": Claude did not come back up within 90 s"))
+    return {"pane_id": pane_id, "session_id": new_sid, "from": live["session_id"]}
+
+
+def fork(pane_id: str | None = None) -> dict:
+    """Open a copy of the conversation in a new tab next to it (fork_command, which runs Claude
+    with --fork-session): it starts with the whole history under a new session id, and the
+    original goes on untouched."""
+    live = open_session(pane_id)
+    c = launch_values(live)
+    if not transcript_path(live["session_id"]):
+        raise ValueError("this session has no conversation yet: nothing to fork")
+    cwd = c["cwd"] or str(HOME)
+    tab = herdr("tab", "create", "--workspace", live["workspace_id"], "--cwd", cwd,
+                "--label", f"{live.get('tab') or Path(cwd).name} fork", "--focus")
+    pane = tab["root_pane"]["pane_id"]
+    herdr("pane", "run", pane, resume_command(c, template=CONF["fork_command"]))
+    new_sid = wait_session(pane)
+    if new_sid == live["session_id"]:
+        # The launcher dropped --fork-session: that is a second writer on the same transcript.
+        log(f"fork of {live['session_id']} in {pane} resumed the same session: fork_command must pass --fork-session")
+        raise ValueError("the new tab resumed the same session instead of a copy: fork_command (or your "
+                         f"launcher) must pass --fork-session to claude. Close the tab {pane}.")
+    log(f"forked {live['session_id']} into {new_sid or '?'} ({pane})")
+    return {"pane_id": pane, "session_id": new_sid, "from": live["session_id"]}
+
+
+def park_all(force: bool = False, dry_run: bool = False) -> dict:
+    """Park every open session as one batch, before a reboot: `restore` reopens the batch as it
+    was. Summaries are written in parallel; panes close only after every card is on disk. Refuses
+    while a session is working or waiting for an answer, unless `force`. The pane this runs in
+    (a Claude session parking everything) closes last."""
+    if not herdr_running():
+        raise HerdrDown("start herdr first")
+    own = os.environ.get("HERDR_PANE_ID")
+    live = live_sessions()
+    busy = [s for s in live if s["status"] not in QUIET and s["pane_id"] != own]
+    if busy and not force:
+        names = ", ".join(f"{display_label(s)} ({s['status']})" for s in busy)
+        raise ValueError(f"still busy: {names}. Wait for them, or force it")
+    if dry_run:
+        return {"batch": None, "sessions": [{"session_id": s["session_id"], "label": display_label(s)} for s in live]}
+    batch = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    live.sort(key=lambda s: s["pane_id"] == own)
+
+    def card(s: dict) -> dict:
+        return write_card(s["session_id"], display_label(s), s["cwd"], "park-all",
+                          {"batch": batch, "position": position(s)})
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [(s, pool.submit(card, s)) for s in live]
+    done, failed = [], []
+    for s, f in futures:
+        try:
+            f.result()
+        except Exception as e:  # noqa: BLE001 — without its card the session stays open
+            failed.append({"session_id": s["session_id"], "label": display_label(s), "error": str(e)})
+            log(f"park-all: no card for {s['session_id']}, left open: {e}")
+            continue
+        done.append({"session_id": s["session_id"], "label": display_label(s)})
+    log(f"park-all {batch}: {len(done)} cards" + (f", {len(failed)} left open" if failed else ""))
+    for s in live:
+        if any(d["session_id"] == s["session_id"] for d in done):
+            try:
+                close_pane(s)
+                kill_strays(s["session_id"])
+            except Exception as e:  # noqa: BLE001 — the card is written: one pane that won't close stops nothing
+                log(f"park-all: could not close {s['pane_id']}: {e}")
+    return {"batch": batch, "sessions": done, "failed": failed}
+
+
+def restore(batch: str | None = None) -> dict:
+    """Resume a batch of parked sessions in their places: the last park-all, or whatever the last
+    reboot cut off, whichever is newer. Each goes back to a tab of its project's workspace, in the
+    order they sat in herdr's sidebar."""
+    group = [c for c in cards() if c.get("batch")]
+    if not group:
+        raise ValueError("nothing to restore: no park-all or reboot batch among the parked sessions")
+    batch = batch or max(c["batch"] for c in group)
+    todo = [c for c in group if c["batch"] == batch]
+    if not todo:
+        raise ValueError(f"no parked sessions left from batch {batch}")
+    todo.sort(key=lambda c: [999 if n is None else n for n in (c.get("position") or [None, None])])
+    out = []
+    for c in todo:
+        try:
+            out.append({"session_id": c["session_id"], "label": c["label"], "workspace": resume_in_herdr(c["session_id"])})
+        except (ValueError, RuntimeError) as e:
+            if isinstance(e, HerdrDown):
+                raise
+            out.append({"session_id": c["session_id"], "label": c["label"], "error": str(e)})
+            log(f"restore {batch}: could not resume {c['session_id']}: {e}")
+    log(f"restored batch {batch}: {sum('error' not in r for r in out)}/{len(out)}")
+    return {"batch": batch, "sessions": out}
+
+
+def detach(argv: list[str]) -> None:
+    """Run this command again in the background, outside the pane: restarting or parking the
+    session that runs it kills its process tree."""
+    with open(os.devnull, "wb") as null:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), *argv, "--detached"],
+                         stdin=null, stdout=null, stderr=null, start_new_session=True)
 
 
 # --------------------------------------------------------------------------- continuing
@@ -1912,6 +2132,44 @@ def feed(dry_run: bool = False, force: bool = True) -> dict:
     return out
 
 
+def session_action(args) -> int:
+    """restart, fork, park-all and restore from the command line. Run from inside the session they
+    close (a skill, a command), restart and park-all check first and then go on detached."""
+    own = os.environ.get("HERDR_PANE_ID")
+    if args.cmd == "restart":
+        live = open_session(args.pane_id)
+        if live["pane_id"] == own and not args.detached:
+            detach(["restart", live["pane_id"], "--force"])
+            print(f"restarting {display_label(live)}: it closes in a moment and comes back in the same tab")
+            return 0
+        r = restart(live["pane_id"], args.force)
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r["session_id"] else 1
+    if args.cmd == "fork":
+        r = fork(args.pane_id)
+        print(json.dumps(r, ensure_ascii=False))
+        return 0 if r["session_id"] else 1
+    if args.cmd == "park-all":
+        preview = park_all(args.force, dry_run=True)
+        inside = bool(own) and own in {s["pane_id"] for s in live_sessions()}
+        if args.dry_run or (inside and not args.detached):
+            names = ", ".join(s["label"] for s in preview["sessions"]) or "none"
+            if args.dry_run:
+                print(f"would park {len(preview['sessions'])}: {names}")
+                return 0
+            detach(["park-all", "--force"] if args.force else ["park-all"])
+            print(f"parking {len(preview['sessions'])} in the background, this one last: {names}. "
+                  "Then: herdr-valet restore")
+            return 0
+        r = park_all(args.force)
+        print(json.dumps(r, ensure_ascii=False))
+        return 1 if r["failed"] else 0
+    r = restore(args.batch)
+    for x in r["sessions"]:
+        print(f"  {x['label']:<30} {x.get('error') or 'resumed'}")
+    return 1 if any("error" in x for x in r["sessions"]) else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1937,6 +2195,17 @@ def main() -> int:
     co.add_argument("handoff")
     co.add_argument("--from", dest="pane_id")
     co.add_argument("--keep", action="store_true", help="leave the old session open")
+    for name in ("restart", "fork"):
+        x = sub.add_parser(name)
+        x.add_argument("pane_id", nargs="?", help="default: $HERDR_PANE_ID")
+        if name == "restart":
+            x.add_argument("--force", action="store_true", help="even if it is working or waiting")
+            x.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)
+    pa = sub.add_parser("park-all")
+    pa.add_argument("--force", action="store_true", help="even the sessions that are working or waiting")
+    pa.add_argument("--dry-run", action="store_true")
+    pa.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)
+    sub.add_parser("restore").add_argument("--batch")
     sub.add_parser("recap").add_argument("pane_id")
     sub.add_parser("sync").add_argument("--dry-run", action="store_true")
     sub.add_parser("feed").add_argument("--dry-run", action="store_true")
@@ -1995,6 +2264,15 @@ def main() -> int:
         print(json.dumps(r, ensure_ascii=False))
         if not r["session_id"]:
             print("no session showed up in the new tab: the old one stays open", file=sys.stderr)
+            return 1
+    elif args.cmd in ("restart", "fork", "park-all", "restore"):
+        try:
+            return session_action(args)
+        except HerdrDown as e:
+            print(f"herdr is not running: {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print(e, file=sys.stderr)
             return 1
     elif args.cmd == "recap":
         try:

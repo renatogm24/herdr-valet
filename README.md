@@ -29,11 +29,21 @@ herdr-valet:
    the session (a skill or command of yours writes the handoff first), opens a tab next to it
    where Claude starts on that file with the same model, waits until it is up, and only then
    parks the old one. The two cards point at each other (`continued_in` / `continued_from`).
-8. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
+8. **Restarts and forks an open session:** `restart` closes Claude and reopens the same
+   conversation in the same tab, so a Claude Code update, MCP servers or plugins load. `fork`
+   opens a copy of the conversation in a new tab next to it (`--fork-session`: same history, new
+   session id) to ask something else there; the original goes on untouched. Both default to the
+   pane they run in, so a skill or command inside the session can call them.
+9. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
+   session's card in parallel and only then closes them, as one batch; `restore` reopens the
+   newest batch, each session in its project's workspace, in the order they sat in herdr's
+   sidebar. A reboot nobody prepared for leaves a batch too (the snapshot's), so `restore` also
+   brings back what it cut off. Both are buttons on the page as well.
+10. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
    since the last run: each conversation entry (user and assistant text, by `uuid`), cards and
    recaps. No LLM on the machine; whoever receives it summarizes. Sessions in a herdr tab named
    `knowledge-…` send everything, tool calls and results included. Secrets are masked first.
-9. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
+11. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
@@ -62,14 +72,17 @@ command; cards and config stay.
 
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
 - CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
-  `switch <pane_id> --as PROFILE`, `recap <pane_id>`, `stats <session_id>`,
+  `switch <pane_id> --as PROFILE`, `restart [pane_id]`, `fork [pane_id]`,
+  `park-all [--dry-run]`, `restore`, `recap <pane_id>`, `stats <session_id>`,
   `auto --dry-run` (what it would park), `sync [--dry-run]`, `feed [--dry-run]`, `config`.
 
 ## Configuration
 
 `~/.config/herdr-valet/config.toml`, see [`config.example.toml`](config.example.toml). The most
 useful key is `resume_command`: if you launch Claude through a wrapper (MCP secrets, flags,
-another account), put it there so the session comes back the way it was opened.
+another account), put it there so the session comes back the way it was opened; `restart` uses
+it too. `fork_command` is its twin for forks, and must pass `--fork-session` on to `claude` (if it
+doesn't, `fork` notices the copy came back as the same session and says so).
 `summary_command` does the same for summaries: if a session belonged to a work account, its
 summary should not go out through your personal one.
 

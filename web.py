@@ -32,7 +32,7 @@ USER = pwd.getpwuid(os.getuid()).pw_name
 PORT = int(os.environ.get("HERDR_VALET_PORT") or valet.CONF["port"])
 SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
-PANE_ACTIONS = ("park", "recap", "switch")
+PANE_ACTIONS = ("park", "recap", "switch", "restart", "fork")
 PAGE = Path(__file__).resolve().parent / "web.html"
 # Only requests with a loopback Host are served. Without this, DNS rebinding lets a page from
 # another site become "same origin" with this one, read the summaries and send actions with
@@ -74,6 +74,10 @@ def state() -> dict:
             c["resumed_at"] = datetime.fromisoformat(at).timestamp() if at else p.stat().st_mtime
             rows.append(c)
         history = sorted(rows, key=lambda c: c["resumed_at"], reverse=True)[:15]
+    # The batch `restore` would bring back: the newest park-all or reboot among the cards.
+    batches = [c for c in parked if c.get("batch")]
+    newest = max((c["batch"] for c in batches), default=None)
+    group = [c for c in batches if c["batch"] == newest]
     return {
         "user": USER,
         "idle_days": valet.CONF["idle_days"],
@@ -83,6 +87,7 @@ def state() -> dict:
         "profiles": valet.profiles(),
         "live": live,
         "history": history,
+        "batch": {"at": newest, "count": len(group), "reason": group[0]["reason"]} if group else None,
         "herdr_error": herdr_error,
     }
 
@@ -121,6 +126,18 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._json(404, {"error": "not found"})
 
+    def _all(self, action: str) -> None:
+        """Park every open session as one batch, or resume the newest batch."""
+        try:
+            r = valet.park_all() if action == "park-all" else valet.restore()
+            self._json(200, {"ok": True, **r})
+        except valet.HerdrDown as e:
+            self._json(HTTPStatus.CONFLICT, {"error": f"herdr is not running: {e}"})
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
+
     def do_POST(self):  # noqa: N802
         if not self._host_ok():
             return
@@ -130,7 +147,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.FORBIDDEN, {"error": "missing X-Parking"})
             return
         url = urlsplit(self.path)
-        m = re.fullmatch(r"/api/(resume|delete|park|recap|switch)/([^/]+)", url.path)
+        if url.path in ("/api/park-all", "/api/restore"):
+            self._all(url.path.rsplit("/", 1)[1])
+            return
+        m = re.fullmatch(r"/api/(resume|delete|park|recap|switch|restart|fork)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -146,6 +166,10 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, {"ok": True, "card": valet.park(target, "manual")})
                 elif action == "recap":
                     self._json(200, {"ok": True, "recap": valet.recap(target)})
+                elif action == "restart":
+                    self._json(200, {"ok": True, **valet.restart(target)})
+                elif action == "fork":
+                    self._json(200, {"ok": True, **valet.fork(target)})
                 else:
                     if not profile:
                         raise ValueError("switch needs ?as=<profile>")

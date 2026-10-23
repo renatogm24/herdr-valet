@@ -69,6 +69,10 @@
     border-radius: 8px; padding: calc(var(--u) * 1.5) calc(var(--u) * 2); font-size: 0.9rem; }
   .sect { display: flex; align-items: baseline; gap: var(--u); font-size: 0.75rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: calc(var(--u) * 1.5); }
   .sect .n { color: var(--ink); }
+  .sect-row { display: flex; align-items: baseline; gap: var(--u); flex-wrap: wrap; }
+  .sect-row .sect { margin-right: auto; }
+  .sect-row .note { flex-basis: 100%; margin: calc(var(--u) * -0.5) 0 calc(var(--u) * 1.5); }
+  .sect-row .note:empty { display: none; }
 
   /* platform: open now — one row per session: who, how full, what it cost, what to do */
   .platform { display: flex; flex-direction: column; gap: 6px; }
@@ -221,7 +225,11 @@
   <div id="banner"></div>
 
   <section aria-labelledby="h-open">
-    <h2 class="sect" id="h-open">Open now <span class="n" id="c-live"></span></h2>
+    <div class="sect-row">
+      <h2 class="sect" id="h-open">Open now <span class="n" id="c-live"></span></h2>
+      <div class="acts" id="all-acts"></div>
+      <div class="note" id="all-note"></div>
+    </div>
     <div class="platform" id="live"><div class="sk" style="height:42px;width:260px"></div><div class="sk" style="height:42px;width:220px"></div></div>
   </section>
 
@@ -381,6 +389,8 @@ function renderLive() {
         <div class="stats">${statsHtml(s.stats)}</div>
         <span class="st ${working ? "working" : ""}">${working ? (s.status === "blocked" ? "waiting" : "working") : idle}</span>
         <div class="acts">
+          ${working ? "" : `<button class="btn small" data-act="restart" title="Close Claude and reopen this same conversation in its tab: loads updates, MCP servers and plugins">Restart</button>`}
+          <button class="btn small" data-act="fork" title="Open a copy of this conversation in a new tab next to it, to ask something else there. This one stays as it is">Fork</button>
           <button class="btn small" data-act="recap">${rc ? (shownRecaps.has(s.session_id) ? "Hide recap" : "Recap") : "Recap"}</button>
           ${switches.map((p) => `<button class="btn small to-pf" style="--pf:${pfColor(p.name)}" data-act="switch" data-as="${esc(p.name)}" title="Close it here and reopen the same conversation on ${esc(p.label)}">Move to ${esc(p.label)}</button>`).join("")}
           ${working ? "" : `<button class="btn small" data-act="park">Park</button>`}
@@ -408,6 +418,8 @@ function renderLive() {
         }
         run(btn, "Summarizing… ~15 s", `api/recap/${pane}`, () => shownRecaps.add(s.session_id));
       };
+      else if (act === "restart") btn.onclick = () => run(btn, "Restarting… ~10 s", `api/restart/${pane}`, () => {});
+      else if (act === "fork") btn.onclick = () => run(btn, "Opening the copy in a new tab… ~10 s", `api/fork/${pane}`, () => {});
       else if (act === "park") btn.onclick = () =>
         run(btn, rc && !rc.stale ? "Closing…" : "Summarizing and closing… ~15 s", `api/park/${pane}`, (r) => { selected = r.card?.session_id || selected; });
       else if (act === "switch") btn.onclick = () => {
@@ -418,6 +430,42 @@ function renderLive() {
     }
     live.append(el);
   });
+}
+
+// Park all (before a reboot) and Restore (the newest batch: a Park all, or what a reboot cut off).
+function renderAllActions() {
+  const acts = $("all-acts"), note = $("all-note");
+  acts.replaceChildren();
+  const b = ST.batch;
+  if (b && ST.herdr_running) {
+    const btn = document.createElement("button");
+    btn.className = "btn small primary";
+    btn.textContent = `Restore ${b.count}`;
+    btn.title = b.reason === "reboot"
+      ? `Reopen the ${b.count} sessions the reboot cut off, each in its workspace and tab`
+      : `Reopen the ${b.count} sessions parked with Park all (${ago(b.at)}), each in its workspace and tab`;
+    btn.onclick = () => runAll(btn, `Reopening ${b.count} sessions…`, "api/restore",
+      (r) => { const bad = r.sessions.filter((x) => x.error); return bad.length ? `Could not reopen: ${bad.map((x) => `${x.label} (${x.error})`).join("; ")}` : ""; });
+    acts.append(btn);
+  }
+  if (ST.live.length) {
+    const btn = document.createElement("button");
+    btn.className = "btn small";
+    btn.textContent = "Park all";
+    btn.title = "Before a reboot: park every open session with its summary; Restore brings them back where they were";
+    btn.onclick = () => {
+      if (!arm(btn, `Park all ${ST.live.length}? Click again`, note, `Writes a card for each open session, then closes them. Restore reopens them in the same places.`)) return;
+      runAll(btn, `Summarizing and closing ${ST.live.length} sessions… ~30 s`, "api/park-all",
+        (r) => r.failed.length ? `Left open (no card): ${r.failed.map((x) => x.label).join(", ")}` : "");
+    };
+    acts.append(btn);
+  }
+}
+async function runAll(btn, msg, path, problems) {
+  const note = $("all-note"), buttons = [...$("all-acts").querySelectorAll("button")];
+  busy = true; buttons.forEach((b) => (b.disabled = true)); note.className = "note"; note.textContent = msg;
+  try { const r = await post(path); busy = false; const p = problems(r); note.className = p ? "note bad" : "note"; note.textContent = p; load(); }
+  catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; buttons.forEach((b) => (b.disabled = false)); }
 }
 
 // ------------------------------------------------------------------ the line map
@@ -508,7 +556,7 @@ function renderDetail() {
       ${c.branch ? `<span>Branch <b class="mono">${esc(c.branch)}</b></span>` : ""}
       <span>Model <b>${esc(c.model || "default")}</b></span>
       ${c.profile ? `<span>Runs on ${pfBadge(c.profile)}</span>` : ""}
-      ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : isClosed(c) ? `<span class="reboot" title="You closed its pane; this card goes away on its own">Closed by hand · goes away in ${daysLeft(c)}d</span>` : `<span>Parked by hand</span>`}
+      ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : c.reason === "park-all" ? `<span>Parked with Park all</span>` : isClosed(c) ? `<span class="reboot" title="You closed its pane; this card goes away on its own">Closed by hand · goes away in ${daysLeft(c)}d</span>` : `<span>Parked by hand</span>`}
     </div>
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
     ${alertsHtml(c.stats)}
@@ -605,6 +653,7 @@ async function load() {
       `<div class="banner" role="status">herdr is not running — did the machine reboot? Resume needs it: open the terminal, or press Resume to get a command to run by hand.</div>`;
     keepSelection();
     renderLive();
+    renderAllActions();
     renderMap();
     renderDetail();
   } catch (e) {
