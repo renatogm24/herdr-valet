@@ -10,7 +10,9 @@ herdr-valet:
 1. **Parks:** Haiku writes a card (title, where we left off, what is still pending, next step)
    with the directory, branch and model. Only then is the pane closed.
 2. **Parks automatically:** every 10 min, whatever has been idle for more than `idle_days` (3).
-   Never a session that is working, waiting for an answer or focused.
+   Never a session that is working, waiting for an answer or focused. When Claude Code moves a
+   running conversation to a new session id (`continued-in` in the old transcript), idle time,
+   the card and the resume follow the new one.
 3. **Survives a reboot:** it keeps a snapshot of what is open. If the machine reboots, every
    session that did not come back gets its card ("cut off by a reboot").
    A session closed by hand (pane closed, Claude exited) gets one too, kept for
