@@ -108,6 +108,7 @@
   .gauge.mid i b { background: var(--warn); } .gauge.hi i b { background: var(--bad); }
   .gauge.hi { color: var(--bad); font-weight: 600; }
   .stats .hot { color: var(--warn); font-weight: 600; }
+  .stats .cache.cold { color: var(--muted); font-style: italic; }
   .alerts { display: flex; flex-wrap: wrap; gap: 6px; }
   .alerts span { font-size: 0.75rem; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 9px; }
   .empty-line { font-size: 0.88rem; color: var(--muted); }
@@ -321,7 +322,20 @@ function statsHtml(st) {
   const costTitle = `Estimated at list prices${st.subagents ? `, ${st.subagents} subagents included` : ""}${st.unpriced_models.length ? `; no price for ${st.unpriced_models.join(", ")}` : ""}`;
   return `<span class="gauge ${lvl}" title="Context: ${ktok(st.context_tokens)} of ${ktok(st.context_window)} tokens"><i><b style="width:${Math.min(100, st.context_pct)}%"></b></i>${Math.round(st.context_pct)}%</span>
     <span class="${st.compactions >= 3 ? "hot" : ""}" title="${esc(compTitle)}">${st.compactions} compact${st.compactions === 1 ? "" : "s"}</span>
-    <span title="${esc(costTitle)}">≈ ${money(st.cost_usd)}</span>`;
+    <span title="${esc(costTitle)}">≈ ${money(st.cost_usd)}</span>${cacheHtml(st)}`;
+}
+// The prompt cache: Claude Code keeps it 1 h on a subscription, 5 min on an API key, from the
+// last reply. Cold, the next message writes the whole context again.
+function cacheHtml(st) {
+  const c = st.cache;
+  if (!c) return "";
+  const left = (Date.parse(c.expires_at) - Date.now()) / 60000;
+  const cold = c.cold_usd == null ? "" : ` ≈ ${money(c.cold_usd)}`;
+  if (left > 0) {
+    const soon = left < 10 ? "hot" : "";
+    return `<span class="cache ${soon}" title="Prompt cache (${c.ttl}) warm for ${Math.ceil(left)} more min: the next message reads the context from it${c.warm_usd == null ? "" : ` (≈ ${money(c.warm_usd)})`}. After that it writes all ${ktok(st.context_tokens)} again${cold}.">cache ${Math.ceil(left)}m</span>`;
+  }
+  return `<span class="cache cold" title="Prompt cache (${c.ttl}) expired ${ago(c.expires_at)}: resuming writes all ${ktok(st.context_tokens)} tokens of context again${cold}. Start fresh begins without them.">cold${cold}</span>`;
 }
 const alertsHtml = (st) => st?.alerts?.length ? `<div class="alerts">${st.alerts.map((a) => `<span>${esc(a)}</span>`).join("")}</div>` : "";
 function summaryHtml(text) {
@@ -569,6 +583,7 @@ function renderDetail() {
     <div class="actions">
       <button class="btn primary" data-act="resume">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}<kbd>↵</kbd></button>
       ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
+      <button class="btn" data-act="fresh" title="A new Claude in the same directory and model, starting from this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">Start fresh</button>
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>`;
@@ -591,6 +606,21 @@ function renderDetail() {
     }
   };
   d.querySelector('[data-act="resume"]').onclick = () => resumeWith(null);
+  d.querySelector('[data-act="fresh"]').onclick = async () => {
+    busy = true; all.forEach((b) => (b.disabled = true));
+    note.className = "note"; note.textContent = "Writing the context and opening…";
+    try {
+      await post(`api/fresh/${c.session_id}`);
+      note.className = "note ok";
+      note.textContent = `Done: a fresh session is starting in a tab of “${p}” in herdr, from this card.`;
+      setTimeout(() => { busy = false; selected = null; load(); }, 2200);
+    } catch (e) {
+      busy = false;
+      note.className = "note bad"; note.textContent = e.message; all.forEach((b) => (b.disabled = false));
+      d.querySelector(".cmd")?.remove();
+      if (e.command) d.querySelector(".actions").append(commandBox(e.command));
+    }
+  };
   d.querySelectorAll('[data-act="resume-as"]').forEach((b) => (b.onclick = () => resumeWith(b.dataset.as)));
   // Confirmation in place, not a browser dialog.
   del.onclick = async () => {

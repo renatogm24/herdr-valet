@@ -17,6 +17,9 @@ the full history; the card is just the index.
     valet.py get <session_id>        one card
     valet.py resume <session_id> [--as PROFILE]   resume in herdr (in a tab of the project's
                                      workspace if one is open), optionally with another profile
+    valet.py fresh <session_id> [--print]   start a parked session over without its history, from
+                                     a context file (card, compaction summary, what you asked,
+                                     files written, the repo now): nothing to re-cache
     valet.py switch <pane_id> --as PROFILE   park an open session and resume it with another profile
     valet.py continue <handoff.md> [--from PANE] [--keep]   hand the session over to a fresh one:
                                      a new tab next to it starts Claude on the handoff file, then
@@ -58,7 +61,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HOME = Path.home()
@@ -104,6 +107,12 @@ DEFAULTS = {
     "fork_command": "claude --resume {session_id} --fork-session --model {model}",
     # Its first message. {handoff} is the handoff file's absolute path.
     "continue_prompt": "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off.",
+    # `fresh`: a parked session started over without its history (none of it to re-cache), from a
+    # context file valet writes: the card, Claude Code's own compaction summary, what the user
+    # asked, the files it wrote, what it published and the repo as it is now. Started with
+    # continue_command; this is its first message ({handoff} is the context file's path).
+    "fresh_prompt": "Pick up the work of an earlier session from {handoff}: read it first, say in a few lines where "
+                    "things stand and what the next step is, then wait for the user.",
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
     # after this many days.
     "closed_keep_days": 7.0,
@@ -182,6 +191,8 @@ CHAINS = DATA / "chains.json"
 LOG = DATA / "valet.log"
 # Summaries of open sessions, asked for from the page: data_dir/recaps/<session_id>.json.
 RECAPS = DATA / "recaps"
+# Context files of sessions started fresh: data_dir/fresh/<session_id>.md.
+FRESH = DATA / "fresh"
 # Each Claude account keeps its conversations in its config dir: the default one and those used
 # through CLAUDE_CONFIG_DIR (convention: ~/.claude-<something>).
 DEFAULT_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude")
@@ -772,7 +783,7 @@ def resume_command(c: dict, profile: str | None = None, template: str | None = N
     return cmd
 
 
-def mark_resumed(session_id: str) -> None:
+def mark_resumed(session_id: str, extra: dict | None = None) -> None:
     """Move the card to history with the resume time: the page lists recently resumed
     sessions, and the timer counts idle time from it (see active_since)."""
     HISTORY.mkdir(parents=True, exist_ok=True)
@@ -780,6 +791,7 @@ def mark_resumed(session_id: str) -> None:
     if src.exists():
         card = json.loads(src.read_text())
         card["resumed_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        card.update(extra or {})
         (HISTORY / src.name).write_text(json.dumps(card, ensure_ascii=False, indent=2))
         src.unlink()
 
@@ -793,9 +805,7 @@ def find_workspace(label: str) -> str | None:
 
 
 def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
-    """Run the resume command in the card's directory: in a new tab of the project's workspace
-    when one is open, so sessions of one project stay together; otherwise in a new workspace
-    named after the project. Returns the workspace id."""
+    """Resume the card's conversation in herdr (where: open_in_herdr). Returns the workspace id."""
     c = json.loads(card_path(session_id).read_text())
     # The card may name an id the conversation moved on from: resume where it lives now.
     target = current_session(session_id)
@@ -814,6 +824,17 @@ def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
     if owners:
         raise ValueError(f"this session is already running (claude pid {', '.join(map(str, owners))}): "
                          "switch to it in herdr, or stop it before resuming here")
+    ws_id = open_in_herdr(c, cmd)
+    mark_resumed(session_id)
+    _PROFILE_CACHE.pop(session_id, None)
+    log(f"resumed {session_id} in {ws_id}" + (f" as {profile}" if profile else ""))
+    return ws_id
+
+
+def open_in_herdr(c: dict, cmd: str) -> str:
+    """Run cmd in the card's directory: in a new tab of the project's workspace when one is open,
+    so sessions of one project stay together; otherwise in a new workspace named after the
+    project. Returns the workspace id."""
     cwd = c["cwd"] or str(HOME)
     project, _, sub = c["label"].partition("/")
     ws_id = find_workspace(project)
@@ -830,9 +851,6 @@ def resume_in_herdr(session_id: str, profile: str | None = None) -> str:
         if sub and first.get("tab_id"):
             herdr("tab", "rename", first["tab_id"], sub)
     herdr("pane", "run", pane, cmd)
-    mark_resumed(session_id)
-    _PROFILE_CACHE.pop(session_id, None)
-    log(f"resumed {session_id} in {ws_id}" + (f" as {profile}" if profile else ""))
     return ws_id
 
 
@@ -1116,6 +1134,183 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
     return result
 
 
+# --------------------------------------------------------------------------- starting fresh
+EDIT_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
+# What a session published: the PRs and issues it opened with gh, the artifacts it put up.
+PUBLISHED_URL = re.compile(r"https://(?:github\.com/[\w.-]+/[\w.-]+/(?:pull|issues)/\d+|claude\.ai/(?:code/)?artifact/[\w-]+)")
+GH_CREATE = re.compile(r"\bgh\s+(?:pr|issue)\s+create\b")
+# How much of what the user typed goes in: each message cut to this, all of them to the total
+# (the first one always, then the most recent that fit).
+ASKED_EACH = 800
+ASKED_TOTAL = 16000
+
+
+def _result_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+    return ""
+
+
+def digest(p: Path) -> dict:
+    """What a fresh session needs from the old transcript, read whole and with no LLM: when it
+    started, Claude Code's own summary from its last compaction (it covers the whole session,
+    unlike the card, which Haiku writes from the end), every message the user typed, the files it
+    wrote and what it published. Subagents' records are left out."""
+    started, compact = None, ""
+    asked: list[str] = []
+    files: dict[str, None] = {}  # insertion-ordered set
+    published: dict[str, None] = {}
+    calls: dict[str, tuple[str, dict]] = {}
+    with p.open(errors="replace") as f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            started = started or d.get("timestamp")
+            if d.get("isSidechain"):
+                continue
+            content = (d.get("message") or {}).get("content")
+            if d.get("isCompactSummary"):
+                compact = _text(content).strip()
+                continue
+            if d.get("type") == "assistant" and isinstance(content, list):
+                for b in content:
+                    if not (isinstance(b, dict) and b.get("type") == "tool_use"):
+                        continue
+                    name, inp = b.get("name") or "", b.get("input") or {}
+                    calls[b.get("id") or ""] = (name, inp)
+                    path = inp.get("file_path") or inp.get("notebook_path")
+                    if name in EDIT_TOOLS and path:
+                        files.pop(path, None)
+                        files[path] = None  # last written last
+            elif d.get("type") == "user":
+                for b in content if isinstance(content, list) else []:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        name, inp = calls.get(b.get("tool_use_id") or "", ("", {}))
+                        urls = PUBLISHED_URL.findall(_result_text(b.get("content")))
+                        # An Artifact publish names its page first; other actions (quickstart,
+                        # list, read) name artifacts it did not make.
+                        if name == "Artifact" and (inp.get("action") or "publish") == "publish" and not inp.get("asset"):
+                            urls = urls[:1]
+                        elif not (name == "Bash" and GH_CREATE.search(str(inp.get("command") or ""))):
+                            urls = []
+                        for url in urls:
+                            published[url] = None
+                if d.get("isMeta"):
+                    continue
+                text = _text(content).strip()
+                if text and not text.startswith(("<system-reminder>", "<command-", "<local-command")):
+                    asked.append(text)
+    return {"started": started, "compact": compact, "asked": asked, "files": list(files), "published": list(published)}
+
+
+def _asked_lines(asked: list[str]) -> list[str]:
+    cut = [a if len(a) <= ASKED_EACH else a[:ASKED_EACH] + " […]" for a in asked]
+    keep, size = [], len(cut[0]) if cut else 0
+    for i in range(len(cut) - 1, 0, -1):
+        if size + len(cut[i]) > ASKED_TOTAL:
+            break
+        keep.append(i)
+        size += len(cut[i])
+    idx = ([0] if cut else []) + sorted(keep)
+    lines = []
+    for n, i in enumerate(idx):
+        if n and i != idx[n - 1] + 1:
+            lines.append(f"(… {i - idx[n - 1] - 1} messages left out, in the transcript)")
+        lines.append(f"{i + 1}. " + cut[i].replace("\n", "\n   "))
+    return lines
+
+
+def _git(cwd: str, *args: str) -> str:
+    try:
+        out = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return out.stdout.rstrip() if out.returncode == 0 else ""
+
+
+def repo_now(cwd: str | None, since: str | None) -> list[str]:
+    """The repo as it is now, not as it was when the session parked: it may have moved since."""
+    if not cwd or not _git(cwd, "rev-parse", "--git-dir"):
+        return []
+    lines = [f"Branch: {_git(cwd, 'rev-parse', '--abbrev-ref', 'HEAD') or '?'}"]
+    status = _git(cwd, "status", "--short").splitlines()
+    lines.append("Uncommitted changes:" if status else "No uncommitted changes.")
+    lines += [f"    {x}" for x in status[:40]] + ([f"    … {len(status) - 40} more"] if len(status) > 40 else [])
+    log_ = _git(cwd, "log", "--oneline", "-n", "30", *([f"--since={since}"] if since else [])).splitlines()
+    if log_:
+        lines.append("Commits since the session started:" if since else "Latest commits:")
+        lines += [f"    {x}" for x in log_]
+    return lines
+
+
+def fresh_context(c: dict, tr: Path) -> str:
+    d = digest(tr)
+    out = [
+        f"# Picking up: {title(c) or c['label']}",
+        "",
+        f"An earlier Claude Code session ({c['session_id']}, {c.get('model') or 'default model'}, last active "
+        f"{(c.get('last_activity') or '?')[:16].replace('T', ' ')} UTC) was parked. This file is what it left; "
+        f"its whole conversation is in {tr} (JSONL, one record per line). Search it with grep for a detail "
+        "you need; don't read it whole.",
+        "",
+        "## The card (written when it parked)",
+        "",
+        c.get("summary") or "(none)",
+    ]
+    if d["compact"]:
+        out += ["", "## Claude Code's summary from the session's last compaction", "", d["compact"]]
+    if d["asked"]:
+        out += ["", "## What the user asked, in their words", "", *_asked_lines(d["asked"])]
+    if d["files"]:
+        out += ["", "## Files it wrote (last written last)", "", *[f"- {x}" for x in d["files"][-60:]]]
+    if d["published"]:
+        out += ["", "## What it published", "", *[f"- {x}" for x in d["published"]]]
+    repo = repo_now(c.get("cwd"), d["started"])
+    if repo:
+        out += ["", f"## The repo now ({c['cwd']})", "", *repo]
+    prev = chains().get(c["session_id"])
+    if prev:
+        out += ["", f"## It continued an earlier session ({prev['from']})", "", f"Handoff: {prev.get('handoff')}"]
+    return redact("\n".join(out)) + "\n"
+
+
+def start_fresh(session_id: str) -> dict:
+    """Start a parked session over in herdr without its history: a new Claude in the card's
+    directory, with the model it ran, whose first message points at a context file written from
+    the card and the transcript (see fresh_context). Nothing of the old conversation is re-cached.
+    The card moves to history, saying where the context file is."""
+    c = json.loads(card_path(session_id).read_text())
+    target = current_session(session_id)
+    tr = transcript_path(target)
+    if not tr:
+        raise ValueError("no transcript for that session: nothing to start from")
+    if c["cwd"] and not Path(c["cwd"]).is_dir():
+        raise ValueError(f"directory no longer exists: {c['cwd']}")
+    FRESH.mkdir(parents=True, exist_ok=True)
+    path = FRESH / f"{session_id}.md"
+    path.write_text(fresh_context({**c, "session_id": target}, tr))
+    path.chmod(0o600)
+    values = {
+        "prompt": CONF["fresh_prompt"].format(handoff=path),
+        "model": requested_model(tr) or c.get("model") or "",
+        "cwd": c["cwd"] or str(HOME),
+        "handoff": str(path),
+    }
+    cmd = CONF["continue_command"].format(**{k: shlex.quote(v) for k, v in values.items()})
+    if c.get("config_dir"):
+        cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(c['config_dir'])} {cmd}"
+    if not herdr_running():
+        raise HerdrDown(f"cd {shlex.quote(values['cwd'])} && {cmd}")
+    ws_id = open_in_herdr(c, cmd)
+    mark_resumed(session_id, {"fresh": str(path)})
+    log(f"started {session_id} fresh in {ws_id}, context {path}")
+    return {"workspace": ws_id, "context": str(path)}
+
+
 # --------------------------------------------------------------------------- profiles
 _PROFILE_CACHE: dict[str, tuple[float, str]] = {}
 
@@ -1232,6 +1427,9 @@ class _FileStats:
         self.model = ""
         self.compactions = 0
         self.last_compaction: dict | None = None
+        # The main thread's last reply and the cache lifetime its writes asked for.
+        self.last_at: str | None = None
+        self.ttl: str | None = None
 
     def feed(self, p: Path, main: bool) -> None:
         with p.open("rb") as f:
@@ -1264,6 +1462,14 @@ class _FileStats:
             self.peak = max(self.peak, ctx)
             # requestedModel keeps the "[1m]" suffix that message.model drops.
             self.model = d.get("requestedModel") or model
+            self.last_at = d.get("timestamp") or self.last_at
+            # Claude Code picks the lifetime (1 h on a subscription, 5 min on an API key): the
+            # writes say which. A reply that only read the cache keeps the last one seen.
+            cc = u.get("cache_creation") or {}
+            if cc.get("ephemeral_1h_input_tokens"):
+                self.ttl = "1h"
+            elif cc.get("ephemeral_5m_input_tokens"):
+                self.ttl = "5m"
         # One reply is stored as one record per content block, each with the same usage.
         mid = msg.get("id") or d.get("requestId") or d.get("uuid")
         if mid in self.seen:
@@ -1311,6 +1517,25 @@ def context_window(model: str, peak: int) -> int:
     return 1_000_000 if peak > window else window
 
 
+CACHE_TTL = {"1h": 3600, "5m": 300}
+
+
+def cache_state(st: _FileStats) -> dict | None:
+    """When the prompt cache of the main thread expires, and what the next message costs either
+    side of that: warm it reads the context from the cache; cold it writes the whole context again
+    (2x input for 1 h, 1.25x for 5 min). None before the first reply that wrote the cache."""
+    if not (st.last_at and st.ttl and st.context):
+        return None
+    expires = datetime.fromisoformat(st.last_at.replace("Z", "+00:00")) + timedelta(seconds=CACHE_TTL[st.ttl])
+    pr = price(st.model)
+    return {
+        "ttl": st.ttl,
+        "expires_at": expires.isoformat(timespec="seconds"),
+        "cold_usd": round(st.context * pr[0] * (2 if st.ttl == "1h" else 1.25) / 1e6, 2) if pr else None,
+        "warm_usd": round(st.context * pr[2] / 1e6, 2) if pr else None,
+    }
+
+
 def stats(tr: Path) -> dict:
     """Context in use, compactions and estimated cost of a session, its subagents included, plus
     the alerts it trips."""
@@ -1337,6 +1562,7 @@ def stats(tr: Path) -> dict:
         "subagents": len(subs),
         "unpriced_models": sorted(main.unpriced.union(*(s.unpriced for s in subs))),
         "alerts": alerts,
+        "cache": cache_state(main),
     }
 
 
@@ -2188,6 +2414,9 @@ def main() -> int:
     r = sub.add_parser("resume")
     r.add_argument("session_id")
     r.add_argument("--as", dest="profile")
+    fr = sub.add_parser("fresh")
+    fr.add_argument("session_id")
+    fr.add_argument("--print", action="store_true", help="only print the context file it would start from")
     sw = sub.add_parser("switch")
     sw.add_argument("pane_id")
     sw.add_argument("--as", dest="profile", required=True)
@@ -2250,6 +2479,27 @@ def main() -> int:
             print(f"herdr is not running; by hand: {e}", file=sys.stderr)
             return 1
         except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "fresh":
+        try:
+            if args.print:
+                cp = card_path(args.session_id)
+                # Without a card (an open session), the context file still shows what it would hold.
+                tr = transcript_path(current_session(args.session_id))
+                if not tr:
+                    raise ValueError("no transcript for that session")
+                c = json.loads(cp.read_text()) if cp.exists() else {
+                    "session_id": args.session_id, "label": args.session_id, "summary": "(not parked: no card)",
+                    "cwd": next((json.loads(x).get("cwd") for x in reversed(_tail(tr)) if '"cwd"' in x), None),
+                    "model": last_model(tr), "last_activity": mtime_iso(tr)}
+                print(fresh_context({**c, "session_id": tr.stem}, tr), end="")
+            else:
+                print(json.dumps(start_fresh(args.session_id), ensure_ascii=False))
+        except HerdrDown as e:
+            print(f"herdr is not running; by hand: {e}", file=sys.stderr)
+            return 1
+        except (ValueError, FileNotFoundError) as e:
             print(e, file=sys.stderr)
             return 1
     elif args.cmd == "continue":

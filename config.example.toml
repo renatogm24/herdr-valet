@@ -43,11 +43,15 @@
 # alert_compactions = 3
 # alert_cost_usd = 25
 
-# `continue`: how the fresh session starts, in a new tab of the old one's workspace and directory.
-# {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd} and {handoff} are
-# substituted, already shell-quoted. continue_prompt is its first message ({handoff} = the file's path).
+# `continue` and `fresh`: how the new session starts, in a new tab of the old one's workspace and
+# directory. {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd} and
+# {handoff} are substituted, already shell-quoted. If resume_command goes through a launcher of yours
+# (an account, MCP secrets), point this at it too, or the new session starts without them.
+# continue_prompt is the first message of `continue`, fresh_prompt that of `fresh` ({handoff} = the
+# file's path).
 # continue_command = "claude --model {model} {prompt}"
 # continue_prompt = "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off."
+# fresh_prompt = "Pick up the work of an earlier session from {handoff}: read it first, say in a few lines where things stand and what the next step is, then wait for the user."
 
 # `fork`: how a copy of an open conversation starts, in a new tab next to it. Same placeholders as
 # resume_command; {model} is the one the session requested. A launcher of yours must pass
