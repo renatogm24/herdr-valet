@@ -44,9 +44,11 @@
 # alert_cost_usd = 25
 
 # `continue` and `fresh`: how the new session starts, in a new tab of the old one's workspace and
-# directory. {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd} and
-# {handoff} are substituted, already shell-quoted. If resume_command goes through a launcher of yours
-# (an account, MCP secrets), point this at it too, or the new session starts without them.
+# directory. {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd}, {handoff},
+# {session_id} and {profile} (the old session's) are substituted, already shell-quoted. If
+# resume_command goes through a launcher of yours (an account, MCP secrets), point this at it too, or
+# the new session starts without them:
+# "my-launcher new --as {profile} --model {model} {session_id} {prompt}".
 # continue_prompt is the first message of `continue`, fresh_prompt that of `fresh` ({handoff} = the
 # file's path).
 # continue_command = "claude --model {model} {prompt}"
