@@ -21,7 +21,10 @@ herdr-valet:
    button, open sessions with **Park**, and recently resumed ones. Works from a phone.
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
    included), with alerts past a threshold, and a **Recap** of what each one is doing without
-   closing it (parking right after reuses it).
+   closing it (parking right after reuses it). It also shows the **prompt cache**: how long it
+   stays warm (Claude Code keeps it 1 h on a subscription, 5 min on an API key, counted from the
+   last reply, which the transcript's cache writes tell), and once it is cold, what the next
+   message costs to write the whole context again (`cold ≈ $…`, at list prices).
 6. **Profiles (optional):** if you launch Claude in more than one way (two accounts, a proxy, a
    wrapper), each session shows which one it runs with, and can be resumed, or switched while
    open, with another.
@@ -47,6 +50,16 @@ herdr-valet:
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
+
+**Start fresh** (`valet.py fresh <session_id>`, or the button on a card) starts a parked session
+over without its history, so none of it is written to the cache again: a new Claude in the card's
+directory, with its model, whose first message points at a context file in
+`data_dir/fresh/<session_id>.md`. valet writes it from the transcript, with no LLM: the card,
+Claude Code's own summary from the last compaction (it covers the whole session; the card only
+its end), every message you typed (the first and the latest that fit), the files it wrote, the PRs,
+issues and artifacts it published, the repo as it is now (branch, uncommitted changes, commits
+since the session started) and the transcript's path, to look a detail up. Secrets are masked.
+`--print` shows the file without starting anything.
 
 Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
 a new workspace otherwise: the whole conversation comes back; the card is just the index.

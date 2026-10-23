@@ -60,8 +60,11 @@ def state() -> dict:
         s["profile"] = valet.profile_of(s["session_id"])
     parked = valet.cards()
     for c in parked:
-        # Cards from before stats were recorded: read them from the transcript.
-        c["stats"] = c.get("stats") or _stats(valet.transcript_path(c["session_id"]))
+        # Cards from before stats (or their cache) were recorded: read them from the transcript.
+        if not (c.get("stats") or {}).get("cache"):
+            now = _stats(valet.transcript_path(c["session_id"]))
+            if now:
+                c["stats"] = {**(c.get("stats") or now), "cache": now["cache"]}
         c["profile"] = c.get("profile") or valet.profile_of(c["session_id"])
     history = []
     if valet.HISTORY.is_dir():
@@ -150,7 +153,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/park-all", "/api/restore"):
             self._all(url.path.rsplit("/", 1)[1])
             return
-        m = re.fullmatch(r"/api/(resume|delete|park|recap|switch|restart|fork)/([^/]+)", url.path)
+        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -181,6 +184,8 @@ class Handler(BaseHTTPRequestHandler):
                 valet.card_path(target).unlink()
                 valet.log(f"deleted {target} (web)")
                 self._json(200, {"ok": True})
+            elif action == "fresh":
+                self._json(200, {"ok": True, **valet.start_fresh(target)})
             else:
                 ws = valet.resume_in_herdr(target, profile)
                 self._json(200, {"ok": True, "workspace": ws})
