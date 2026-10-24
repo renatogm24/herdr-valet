@@ -1092,6 +1092,48 @@ def chains() -> dict:
         return {}
 
 
+# Markers claude-launch drops in an ad-hoc session directory, which the handoff skill uses as the
+# checkout when there is no git repo (~/.claude/hooks/handoff_common.py).
+SESSION_MARKERS = (".last-accessed", ".session.conf", ".session-1.conf")
+
+
+def retire_handoffs(cwd: str, by: str) -> list[str]:
+    """Mark the handoff skill's `status: active` files for this checkout `superseded`, so the
+    skill's SessionStart hook does not load them next to the handoff the new session is given.
+    The old session had them in context when it wrote that one. Same checkout and branch key as
+    the skill: the git toplevel and branch (`detached@<sha7>`), or else the nearest ad-hoc
+    session directory and its name."""
+    top = _git(cwd, "rev-parse", "--show-toplevel")
+    if top and Path(top).resolve() != HOME.resolve():
+        branch = _git(cwd, "branch", "--show-current") or f"detached@{_git(cwd, 'rev-parse', '--short=7', 'HEAD') or 'unknown'}"
+    else:
+        here = Path(cwd).resolve()
+        top = next((str(d) for d in (here, *here.parents) if d != HOME.resolve()
+                    and HOME.resolve() in d.parents and any((d / m).exists() for m in SESSION_MARKERS)), "")
+        branch = Path(top).name
+    if not top:
+        return []
+    retired = []
+    stamp = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    for f in sorted((Path(top) / ".claude" / "handoffs").glob("*.md")):
+        try:
+            text = f.read_text()
+        except OSError:
+            continue
+        head = text.split("\n---", 2)[0] if text.startswith("---") else ""
+        if not re.search(r"^status:\s*active\s*$", head, re.M) or not re.search(
+                rf"^branch:\s*{re.escape(branch)}\s*$", head, re.M):
+            continue
+        text = re.sub(r"^status:.*$", "status: superseded", text, count=1, flags=re.M)
+        text = re.sub(r"^updated:.*$", f"updated: {stamp}", text, count=1, flags=re.M)
+        text = text.rstrip("\n") + f"\n- {stamp.replace('T', ' ')} superseded by a herdr-valet relaunch, handoff {by}\n"
+        f.write_text(text)
+        retired.append(str(f))
+    if retired:
+        log(f"relaunch: retired {len(retired)} active handoff(s) in {top}")
+    return retired
+
+
 def continue_session(handoff: str, pane_id: str | None = None, keep: bool = False, wait_s: float = 90,
                      request: str = "") -> dict:
     """Hand a long conversation over to a fresh one. Opens a tab in the old session's workspace
@@ -1129,6 +1171,7 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
     config_dir = str(tr.parents[2]) if tr else str(DEFAULT_CONFIG_DIR)
     if config_dir != str(DEFAULT_CONFIG_DIR):
         cmd = f"CLAUDE_CONFIG_DIR={shlex.quote(config_dir)} {cmd}"
+    retire_handoffs(cwd, str(path))  # before the new session starts: its SessionStart hook loads them
     tab = herdr("tab", "create", "--workspace", old["workspace_id"], "--cwd", cwd,
                 "--label", old.get("tab") or Path(cwd).name, "--focus")
     pane = tab["root_pane"]["pane_id"]
