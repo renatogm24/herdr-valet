@@ -134,6 +134,8 @@
   .gauge i b { display: block; height: 100%; background: var(--ok); }
   .gauge.mid i b { background: var(--warn); } .gauge.hi i b { background: var(--bad); }
   .gauge.mid { color: var(--warn); font-weight: 600; } .gauge.hi { color: var(--bad); font-weight: 600; }
+  /* The limit next to the tokens, so "381k / 300k" can't be read as the status line's % of the window. */
+  .gauge .of { color: var(--muted); font-weight: 400; margin-left: -2px; }
   .stats .hot { color: var(--warn); font-weight: 600; }
   .stats .cache.cold { color: var(--muted); font-style: italic; }
   .advice { font-size: 0.84rem; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 8px 12px; }
@@ -349,9 +351,9 @@ function statsHtml(st) {
   const lc = st.last_compaction;
   const compTitle = lc ? `Last: ${ago(lc.at)}, ${lc.trigger}, from ${ktok(lc.pre_tokens || 0)} tokens` : "Never compacted";
   const costTitle = `Estimated at list prices${st.subagents ? `, ${st.subagents} subagents included` : ""}${st.unpriced_models.length ? `; no price for ${st.unpriced_models.join(", ")}` : ""}`;
-  const ctxTitle = `Context: ${ktok(st.context_tokens)} tokens. The bar fills up to ${ktok(limit)}, where auto-compaction starts happening` +
+  const ctxTitle = `Context: ${ktok(st.context_tokens)} tokens. The bar fills up to ${ktok(limit)} (alert_context_tokens), the zone where auto-compaction happens` +
     `${lc ? ` (this session last compacted at ${ktok(lc.pre_tokens || 0)})` : ""}; the model's window is ${ktok(st.context_window)}.`;
-  return `<span class="gauge ${lvl}" role="meter" aria-label="Context" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${Math.min(st.context_tokens, limit)}" title="${esc(ctxTitle)}"><i><b style="width:${fill}%"></b></i>${ktok(st.context_tokens)}</span>
+  return `<span class="gauge ${lvl}" role="meter" aria-label="Context" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${Math.min(st.context_tokens, limit)}" title="${esc(ctxTitle)}"><i><b style="width:${fill}%"></b></i>${ktok(st.context_tokens)}<span class="of">/ ${ktok(limit)}</span></span>
     <span title="${esc(compTitle)}">${st.compactions} compact${st.compactions === 1 ? "" : "s"}</span>
     <span title="${esc(costTitle)}">≈ ${money(st.cost_usd)}</span>${cacheHtml(st)}`;
 }
