@@ -130,6 +130,10 @@ DEFAULTS = {
     # First message of the new session when "relaunch:" came with a request. {handoff} is the
     # handoff or context file, {request} what the user typed (or the file it went to, if long).
     "relaunch_prompt": "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}",
+    # The sections a relaunch handoff is written in: the handoff skill's template, when it is there
+    # (goal, state, the user's constraints quoted, decisions with their why, tried and failed, open
+    # loops, next steps, artifacts). Without it, the session gets a short list of what to cover.
+    "handoff_template": "~/.claude/skills/handoff/templates/handoff.md",
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
     # after this many days.
     "closed_keep_days": 7.0,
@@ -1802,14 +1806,22 @@ def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str) 
     cmd = [sys.executable, str(Path(__file__).resolve()), "continue", str(path), "--from", pane_id]
     if request:
         cmd += ["--prompt-file", str(_request_file(session_id, request))]
+    template = Path(CONF["handoff_template"]).expanduser() if CONF["handoff_template"] else None
+    if template and template.is_file():
+        what = (f"Follow the sections of the handoff template at {template}, leaving out its frontmatter and "
+                "audit log (the new session reads this file once; no hook loads it). Decisions carry their why "
+                "and the options ruled out; the user's constraints go in quotes, in their words; tried-and-failed "
+                "and problems solved name the evidence; paths and URLs, never file contents. Also cover whatever "
+                "from this session the request below needs.")
+    else:
+        what = ("Short and specific: the goal and where things stand; decisions made and why; what was tried and "
+                "ruled out; open items and gotchas; the files, branches, PRs and commands that matter; and whatever "
+                "from this session the request below needs.")
     return "\n".join([
         'The user typed "relaunch:": this work moves to a new session that starts from a handoff instead of '
         "this whole conversation. Do not start on the request here.",
         f"1. Write the handoff to {path}, in Markdown, for a Claude that has seen none of this conversation. "
-        "Short and specific: the goal and where things stand; decisions made and why; what was tried and "
-        "ruled out; open items and gotchas; the files, branches, PRs and commands that matter; and whatever "
-        f"from this session the request below needs. End it with this conversation's transcript, to grep "
-        f"for details: {tr}",
+        f"{what} End it with this conversation's transcript, to grep for details: {tr}",
         f"2. Run: {shlex.join(cmd)}",
         "   It opens a tab next to this one where a new Claude starts on the handoff"
         + (" and the request" if request else "") + ", then parks this session.",

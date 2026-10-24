@@ -61,6 +61,9 @@
 # when "relaunch:" came with a request ({handoff} = handoff or context file, {request} = the request).
 # relaunch_context_tokens = 200000
 # relaunch_prompt = "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}"
+# The handoff a relaunch asks for follows this template (the handoff skill's); "" or a missing file
+# falls back to a short list of what to cover.
+# handoff_template = "~/.claude/skills/handoff/templates/handoff.md"
 
 # `fork`: how a copy of an open conversation starts, in a new tab next to it. Same placeholders as
 # resume_command; {model} is the one the session requested. A launcher of yours must pass

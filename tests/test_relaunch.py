@@ -172,3 +172,21 @@ class RetireHandoffs(unittest.TestCase):
 
     def test_outside_a_checkout_nothing_happens(self):
         self.assertEqual(valet.retire_handoffs(tempfile.mkdtemp(), "/h/new.md"), [])
+
+
+class HandoffTemplate(unittest.TestCase):
+    def instructions(self, template):
+        self.addCleanup(valet.CONF.__setitem__, "handoff_template", valet.CONF["handoff_template"])
+        valet.CONF["handoff_template"] = template
+        return valet.handoff_instructions("t1", transcript("t1", 300_000), "w1:p1", "")
+
+    def test_the_skill_template_when_there_is_one(self):
+        tpl = Path(tempfile.mkdtemp()) / "handoff.md"
+        tpl.write_text("# Handoff: <title>\n")
+        text = self.instructions(str(tpl))
+        self.assertIn(f"Follow the sections of the handoff template at {tpl}", text)
+        self.assertNotIn("Short and specific", text)
+
+    def test_a_short_list_without_it(self):
+        self.assertIn("Short and specific", self.instructions(str(Path(TMP) / "missing.md")))
+        self.assertIn("Short and specific", self.instructions(""))
