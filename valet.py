@@ -93,9 +93,15 @@ DEFAULTS = {
     # Any other model uses context_window, and a session seen above it is taken to run with 1M.
     "context_windows": "claude-opus-5-5:1000000",
     "context_window": 200000,
-    # Alerts on open and parked sessions: context use (%), compactions, estimated cost (USD).
-    "alert_context_pct": 80.0,
+    # Alerts on open sessions, each a reason to continue in a fresh one. Context in tokens: auto-compaction
+    # has fired anywhere from ~200k up, whatever the window, so a % of 1M says nothing; the page's
+    # context gauge fills up to this too. Compactions: how many before a session counts as worn.
+    # Cold cache: what the next message costs (list prices) once the prompt cache has expired.
+    "alert_context_tokens": 200000,
     "alert_compactions": 3,
+    "alert_cold_usd": 2.0,
+    # No longer read (the alerts above replaced them); kept so configs that set them still load.
+    "alert_context_pct": 80.0,
     "alert_cost_usd": 25.0,
     # `continue`: how the fresh session is started, in a new tab of the old one's workspace and
     # directory. {prompt}, {model}, {cwd} and {handoff} are substituted (already shell-quoted);
@@ -1549,13 +1555,17 @@ def stats(tr: Path) -> dict:
     window = context_window(main.model, main.peak)
     pct = round(100 * main.context / window, 1) if window else 0
     cost = round(main.cost + sum(s.cost for s in subs), 2)
+    cache = cache_state(main)
+    # Reasons to continue in a fresh session, not a tally of what was spent: the money already gone
+    # is no reason to stop, what the next message costs and how worn the context is are.
     alerts = []
-    if pct >= CONF["alert_context_pct"]:
-        alerts.append(f"context {pct:.0f}% full")
+    if main.context >= CONF["alert_context_tokens"]:
+        alerts.append(f"{round(main.context / 1000)}k tokens of context")
     if main.compactions >= CONF["alert_compactions"]:
         alerts.append(f"compacted {main.compactions}x")
-    if cost >= CONF["alert_cost_usd"]:
-        alerts.append(f"${cost:.0f} spent")
+    cold = cache and cache["cold_usd"] is not None and cache["cold_usd"] >= CONF["alert_cold_usd"]
+    if cold and datetime.fromisoformat(cache["expires_at"]) <= datetime.now(timezone.utc):
+        alerts.append(f"cache cold: the next message re-sends it all (≈ ${cache['cold_usd']:.2f})")
     return {
         "context_tokens": main.context,
         "context_window": window,
@@ -1567,7 +1577,7 @@ def stats(tr: Path) -> dict:
         "subagents": len(subs),
         "unpriced_models": sorted(main.unpriced.union(*(s.unpriced for s in subs))),
         "alerts": alerts,
-        "cache": cache_state(main),
+        "cache": cache,
     }
 
 

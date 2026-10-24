@@ -38,10 +38,11 @@
 # context_windows = "claude-opus-5-5:1000000"
 # context_window = 200000
 
-# Alerts on sessions: context use (%), compactions, estimated cost in USD (list prices).
-# alert_context_pct = 80
+# Alerts on open sessions, each a reason to continue in a fresh one: context in tokens (the page's
+# context gauge fills up to it), compactions, and what the next message costs once the cache is cold.
+# alert_context_tokens = 200000
 # alert_compactions = 3
-# alert_cost_usd = 25
+# alert_cold_usd = 2.0
 
 # `continue` and `fresh`: how the new session starts, in a new tab of the old one's workspace and
 # directory. {prompt}, {model} (as the old session requested it, "[1m]" included), {cwd}, {handoff},
