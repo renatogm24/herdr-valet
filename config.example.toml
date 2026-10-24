@@ -56,6 +56,12 @@
 # continue_prompt = "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off."
 # fresh_prompt = "Pick up the work of an earlier session from {handoff}: read it first, say in a few lines where things stand and what the next step is, then wait for the user."
 
+# `relaunch` (and the hook, `valet.py hook`): a message that looks like new work is stopped once the
+# session is past this many tokens. Provisional. relaunch_prompt is the new session's first message
+# when "relaunch:" came with a request ({handoff} = handoff or context file, {request} = the request).
+# relaunch_context_tokens = 200000
+# relaunch_prompt = "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}"
+
 # `fork`: how a copy of an open conversation starts, in a new tab next to it. Same placeholders as
 # resume_command; {model} is the one the session requested. A launcher of yours must pass
 # --fork-session on to claude.

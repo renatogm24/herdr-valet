@@ -32,7 +32,7 @@ USER = pwd.getpwuid(os.getuid()).pw_name
 PORT = int(os.environ.get("HERDR_VALET_PORT") or valet.CONF["port"])
 SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
-PANE_ACTIONS = ("park", "recap", "switch", "restart", "fork")
+PANE_ACTIONS = ("park", "recap", "switch", "restart", "fork", "relaunch")
 PAGE = Path(__file__).resolve().parent / "web.html"
 # Only requests with a loopback Host are served. Without this, DNS rebinding lets a page from
 # another site become "same origin" with this one, read the summaries and send actions with
@@ -56,6 +56,8 @@ def state() -> dict:
         s["place"] = valet.display_label(s)
         tr = Path(s["transcript"]) if s["transcript"] else None
         s["stats"] = _stats(tr)
+        # What Relaunch recommends now (stats just read the transcript: this costs nothing more).
+        s["relaunch"] = valet.relaunch_plan(valet._file_stats(tr, True)) if s["stats"] else None
         s["recap"] = valet.recap_of(s["session_id"], tr)
         s["profile"] = valet.profile_of(s["session_id"])
     parked = valet.cards()
@@ -89,6 +91,8 @@ def state() -> dict:
         "alert_context_tokens": valet.CONF["alert_context_tokens"],
         "alert_cold_usd": valet.CONF["alert_cold_usd"],
         "closed_keep_days": valet.CONF["closed_keep_days"],
+        # Without the hook, Relaunch only offers fresh: a handoff is the hook telling the session what to do.
+        "relaunch_hook": valet.hook_installed(),
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),
@@ -157,7 +161,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/park-all", "/api/restore"):
             self._all(url.path.rsplit("/", 1)[1])
             return
-        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork)/([^/]+)", url.path)
+        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -177,6 +181,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(200, {"ok": True, **valet.restart(target)})
                 elif action == "fork":
                     self._json(200, {"ok": True, **valet.fork(target)})
+                elif action == "relaunch":
+                    # The request goes in the body: it is what the user typed, not for URLs and logs.
+                    n = int(self.headers.get("Content-Length") or 0)
+                    body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                    mode = body.get("mode")
+                    if mode not in ("fresh", "handoff", None):
+                        raise ValueError("mode is fresh or handoff")
+                    self._json(200, {"ok": True, **valet.relaunch(target, mode, str(body.get("prompt") or ""))})
                 else:
                     if not profile:
                         raise ValueError("switch needs ?as=<profile>")

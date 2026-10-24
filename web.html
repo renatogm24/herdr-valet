@@ -116,6 +116,16 @@
   .more .menu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
   .open .note:empty { display: none; }
   .open .recap { border-top: 1px solid var(--rule); padding: calc(var(--u) * 1.5) 12px; }
+  .open .relaunch { border-top: 1px solid var(--rule); padding: calc(var(--u) * 1.5) 12px; display: flex; flex-direction: column; gap: var(--u); font-size: 0.84rem; }
+  .relaunch .rl-head { color: var(--muted); }
+  .relaunch .rl-opt { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+  .relaunch .rl-opt input { margin-top: 3px; accent-color: var(--accent); }
+  .relaunch .rl-opt.off { opacity: 0.55; cursor: default; }
+  .relaunch .rl-opt small { display: block; color: var(--muted); font-size: 0.78rem; }
+  .relaunch .rl-cost { color: var(--body); }
+  .relaunch .rl-rec { font-size: 0.72rem; font-weight: 600; color: var(--ok); }
+  .relaunch .rl-msg { font: inherit; padding: 6px 10px; border: 1px solid var(--rule-strong); border-radius: 6px; background: var(--panel); color: var(--ink); width: 100%; box-sizing: border-box; }
+  .relaunch .rl-acts { display: flex; gap: 6px; }
   .open .recap .summary { border-top: 0; padding-top: 0; grid-template-columns: 140px 1fr; font-size: 0.88rem; }
   .open .recap .when { font-size: 0.75rem; color: var(--muted); margin-top: var(--u); }
   .open .recap .when.stale { color: var(--warn); }
@@ -309,8 +319,9 @@ function parseSummary(text) {
   return out;
 }
 
-async function post(path) {
-  const r = await fetch(path, { method: "POST", headers: { "X-Parking": "1" } });
+async function post(path, body) {
+  const headers = { "X-Parking": "1", ...(body ? { "Content-Type": "application/json" } : {}) };
+  const r = await fetch(path, { method: "POST", headers, body: body ? JSON.stringify(body) : undefined });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw Object.assign(new Error(data.error || `HTTP ${r.status}`), { command: data.command });
   return data;
@@ -399,6 +410,7 @@ function arm(btn, label, note, msg) {
 }
 const shownRecaps = new Set();  // session ids whose recap is unfolded
 const openMenus = new Set();    // session ids whose "⋯" menu is open: a refresh keeps it open
+let relaunching = null;         // session id whose Relaunch panel is open: the page holds still meanwhile
 
 let ST = null;          // last /api/state
 let selected = null;    // session_id of the selected stop
@@ -440,11 +452,11 @@ function renderLive() {
     const switches = working ? [] : otherProfiles(s.profile);
     const alerts = s.stats?.alerts || [];
     // One action of its own at most: Park while idle; the rest wait behind "⋯". An alert brings
-    // Continue fresh, on its band. A working session shows only "⋯".
+    // Relaunch, on its band. A working session shows only "⋯".
     const item = (act, label, hint, extra = "") => `<button role="menuitem" data-act="${act}" ${extra}>${label}<small>${hint}</small></button>`;
     const menu = [
       item("recap", rc && shownRecaps.has(s.session_id) ? "Hide recap" : "Recap", rc && !rc.stale ? "Where it stands, written earlier" : "Haiku writes where it stands, ~15 s"),
-      ...(working || alerts.length ? [] : [item("fresh", "Continue fresh", "Park it and start a new session from its card: none of this context is sent again")]),
+      ...(working || alerts.length ? [] : [item("relaunch", "Relaunch", "Move the work to a new session that starts from the essentials, not this whole context")]),
       item("fork", "Fork", "A copy of the conversation in a new tab, to ask something else there"),
       ...(working ? [] : [item("restart", "Restart", "Close Claude and reopen this conversation: loads updates, MCPs and plugins")]),
       ...switches.map((p) => item("switch", `Move to ${esc(p.label)}`, `Close it here and reopen the same conversation on ${esc(p.label)}`, `data-as="${esc(p.name)}"`)),
@@ -464,16 +476,21 @@ function renderLive() {
         </div>
       </div>
       ${alerts.length ? `<div class="alertbar"><span class="why">${alerts.map(esc).join(" · ")}</span>
-        ${working ? "" : `<button class="btn small primary" data-act="fresh" title="Park it and start a new session from its card: none of this context is sent again">Continue fresh</button>`}</div>` : ""}
+        ${working ? "" : `<button class="btn small primary" data-act="relaunch" title="Move the work to a new session that starts from the essentials, not this whole context">Relaunch</button>`}</div>` : ""}
+      ${relaunching === s.session_id && !working ? relaunchHtml(s) : ""}
       <div class="note" data-note></div>
       ${rc && shownRecaps.has(s.session_id) ? `<div class="recap">${summaryHtml(rc.summary)}
         <p class="when ${rc.stale ? "stale" : ""}">${rc.stale ? "The conversation moved on since this recap — press Recap again to refresh." : `Recap from ${ago(rc.at)}.`}</p></div>` : ""}`;
     const note = el.querySelector("[data-note]");
     const buttons = [...el.querySelectorAll("button")];
-    const run = async (btn, msg, path, after) => {
+    const run = async (btn, msg, path, after, body, done) => {
       openMenus.delete(s.session_id);
       busy = true; buttons.forEach((b) => (b.disabled = true)); note.className = "note"; note.textContent = msg;
-      try { const r = await post(path); await after(r); busy = false; load(); }
+      try {
+        const r = await post(path, body); await after(r); busy = false;
+        // A message to read stays a moment before the refresh takes the row away.
+        if (done) { note.className = "note ok"; note.textContent = done; setTimeout(load, 4000); } else load();
+      }
       catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; buttons.forEach((b) => (b.disabled = false)); }
     };
     const pane = encodeURIComponent(s.pane_id);
@@ -494,16 +511,22 @@ function renderLive() {
       else if (act === "fork") btn.onclick = () => run(btn, "Opening the copy in a new tab… ~10 s", `api/fork/${pane}`, () => {});
       else if (act === "park") btn.onclick = () =>
         run(btn, rc && !rc.stale ? "Closing…" : "Summarizing and closing… ~15 s", `api/park/${pane}`, (r) => { selected = r.card?.session_id || selected; });
-      else if (act === "fresh") btn.onclick = async () => {
-        if (!arm(btn, "Continue fresh? Click again", note, "Parks this session (Haiku writes its card, ~15 s) and opens a new one from that card, without the old context.")) return;
+      else if (act === "relaunch") btn.onclick = () => {
         openMenus.delete(s.session_id);
-        // Park first: the card it writes is what the fresh session starts from.
-        run(btn, "Parking, then starting fresh… ~20 s", `api/park/${pane}`, async (r) => {
-          const sid = r.card?.session_id;
-          if (!sid) return;
-          try { await post(`api/fresh/${sid}`); note.className = "note ok"; note.textContent = "Done: the fresh session is starting in a tab of this workspace."; }
-          catch (e) { note.className = "note bad"; note.textContent = `Parked, but the fresh start failed: ${e.message}. Start fresh is on its card.`; selected = sid; }
-        });
+        relaunching = relaunching === s.session_id ? null : s.session_id;
+        renderLive();
+        if (relaunching) document.querySelector(`.relaunch[data-sid="${s.session_id}"] .rl-msg`)?.focus();
+      };
+      else if (btn.dataset.rl === "cancel") btn.onclick = () => { relaunching = null; renderLive(); };
+      else if (btn.dataset.rl === "go") btn.onclick = () => {
+        const panel = el.querySelector(".relaunch");
+        const mode = panel.querySelector("input[type=radio]:checked")?.value || "fresh";
+        const prompt = panel.querySelector(".rl-msg").value.trim();
+        relaunching = null;
+        run(btn, mode === "handoff" ? "Asking the session for a handoff…" : "Parking, then relaunching fresh… ~20 s",
+          `api/relaunch/${pane}`, () => {}, { mode, prompt },
+          mode === "handoff" ? "Asked: the session writes its handoff, then a new tab opens from it and this one parks (~1 min)."
+            : "Done: the new session is starting in a tab of this workspace.");
       };
       else if (act === "switch") btn.onclick = () => {
         const label = profileLabel(btn.dataset.as);
@@ -511,8 +534,37 @@ function renderLive() {
         run(btn, `Moving to ${label}… ~20 s`, `api/switch/${pane}?as=${encodeURIComponent(btn.dataset.as)}`, () => {});
       };
     }
+    const msg = el.querySelector(".rl-msg");
+    if (msg) msg.onkeydown = (e) => {
+      if (e.key === "Enter") el.querySelector('[data-rl="go"]').click();
+      else if (e.key === "Escape") el.querySelector('[data-rl="cancel"]').click();
+    };
     live.append(el);
   });
+}
+
+// Relaunch: the two ways, what each costs now, the recommended one checked (a handoff while the
+// prompt cache is warm, fresh once it is cold), and the new session's first message.
+function relaunchHtml(s) {
+  const p = s.relaunch;
+  if (!p) return "";
+  const left = p.expires_at ? Math.ceil((Date.parse(p.expires_at) - Date.now()) / 60000) : 0;
+  const cache = p.warm ? `cache warm, ${left} min left` : "cache cold";
+  const hp = p.handoff_usd == null ? "one message" : `≈ ${money(p.handoff_usd)}`;
+  const canHandoff = ST.relaunch_hook;
+  const rec = canHandoff ? p.recommended : "fresh";
+  const opt = (mode, name, cost, hint, disabled) => `<label class="rl-opt ${disabled ? "off" : ""}">
+      <input type="radio" name="rl-${esc(s.session_id)}" value="${mode}" ${rec === mode ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <span><b>${name}</b> <span class="rl-cost">${cost}</span>${rec === mode ? ` <span class="rl-rec">recommended</span>` : ""}<small>${hint}</small></span></label>`;
+  return `<div class="relaunch" data-sid="${esc(s.session_id)}">
+    <p class="rl-head">A new session picks up from the essentials instead of these ${ktok(p.context_tokens)} tokens (${cache}). This one parks.</p>
+    ${opt("handoff", "Handoff + continue", hp, canHandoff
+      ? "Claude writes a handoff here, decisions and their why included, and the new session starts from it."
+      : "Needs the hook in Claude Code's settings (see the README).", !canHandoff)}
+    ${opt("fresh", "Fresh", "$0", "valet writes the context file from the transcript, no Claude. Faster; some of the why is lost.", false)}
+    <input class="rl-msg" type="text" placeholder="First message for the new session (optional)" aria-label="First message for the new session">
+    <div class="rl-acts"><button class="btn small primary" data-rl="go">Relaunch</button><button class="btn small" data-rl="cancel">Cancel</button></div>
+  </div>`;
 }
 
 // Park all (before a reboot) and Restore (the newest batch: a Park all, or what a reboot cut off).
@@ -736,7 +788,7 @@ function keepSelection() {
 
 // ------------------------------------------------------------------ load
 async function load() {
-  if (busy) return;
+  if (busy || relaunching) return;
   try {
     const r = await fetch("api/state", { cache: "no-store" });
     ST = await r.json();

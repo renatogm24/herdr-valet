@@ -22,7 +22,7 @@ herdr-valet:
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
    included), with an alert when one is worth continuing in a fresh session (context past
    `alert_context_tokens`, compacted `alert_compactions` times, or a cold cache whose next message
-   costs more than `alert_cold_usd`) and a **Continue fresh** button next to it, and a **Recap** of what each one is doing without
+   costs more than `alert_cold_usd`) and a **Relaunch** button next to it (see below), and a **Recap** of what each one is doing without
    closing it (parking right after reuses it). It also shows the **prompt cache**: how long it
    stays warm (Claude Code keeps it 1 h on a subscription, 5 min on an API key, counted from the
    last reply, which the transcript's cache writes tell), and once it is cold, what the next
@@ -63,6 +63,34 @@ issues and artifacts it published, the repo as it is now (branch, uncommitted ch
 since the session started) and the transcript's path, to look a detail up. Secrets are masked.
 `--print` shows the file without starting anything.
 
+**Relaunch** moves an open session's work to a new one that starts from the essentials instead of
+the whole conversation. Moving on to other work inside a long session re-reads all of the old work
+with every message, warm cache or cold; relaunching is how you stop that. Two ways:
+
+- **handoff + continue:** Claude writes a handoff in the old session (goal, decisions and their
+  why, what was ruled out, open items, the transcript's path), then runs `continue`. One message:
+  cheap while the prompt cache is warm, the whole context written again once it is cold.
+- **fresh:** the old session parks and starts fresh from its card (the context file above). No LLM,
+  $0; some of the why is lost.
+
+The recommendation is a handoff while the cache is warm and fresh once it is cold; the page's
+Relaunch panel shows both with what each costs now, plus a box for the new session's first message.
+From inside a session, type `relaunch:` (the recommended way), `relaunch fresh:` or
+`relaunch handoff:`, followed by what the new session should do. That takes the **hook**: a
+`UserPromptSubmit` hook in Claude Code's settings (`~/.claude/settings.json`):
+
+```json
+{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "herdr-valet hook"}]}]}}
+```
+
+Besides `relaunch:`, the hook stops a message once when the session is past
+`relaunch_context_tokens` (200k) and the message looks like new work: words that start something
+("comencemos", "siguiente historia", "let's start", "next story", "today's report"…) or a story,
+ticket or finding id the session never mentioned (`PLATAPI-1234`, `F-016`, `AVIT…`; ids in pasted
+text don't count). It shows the plan; send the same message again to stay (that id won't stop a
+message again). It never calls a model, takes about 0.1 s and lets every message through if
+anything goes wrong. Only inside herdr. Without the hook, the page offers fresh only.
+
 Resume runs `claude --resume <id>` in a new tab of the project's workspace if one is open, or in
 a new workspace otherwise: the whole conversation comes back; the card is just the index.
 
@@ -88,6 +116,7 @@ command; cards and config stay.
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
 - CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
   `switch <pane_id> --as PROFILE`, `restart [pane_id]`, `fork [pane_id]`,
+  `relaunch [pane_id] [--mode fresh|handoff] [--prompt TEXT]`, `hook`,
   `park-all [--dry-run]`, `restore`, `recap <pane_id>`, `stats <session_id>`,
   `auto --dry-run` (what it would park), `sync [--dry-run]`, `feed [--dry-run]`, `config`.
 
