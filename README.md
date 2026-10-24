@@ -18,7 +18,9 @@ herdr-valet:
    A session closed by hand (pane closed, Claude exited) gets one too, kept for
    `closed_keep_days` (7); empty sessions, `/clear` and `/resume` don't.
 4. **Web page** (`127.0.0.1:8790`): parked sessions with their summary and a **Resume in herdr**
-   button, open sessions with **Park**, and recently resumed ones. Works from a phone.
+   button, open sessions with **Park**, and recently resumed ones. Works from a phone. The map
+   shows the cards active in the last 7 days (3, 30 or all from the selector; search looks
+   through all of them).
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
    included), with an alert when one is worth continuing in a fresh session (context past
    `alert_context_tokens`, or `alert_context_window_pct` of its window if less, compacted `alert_compactions` times, or a cold cache whose next message
@@ -52,6 +54,10 @@ herdr-valet:
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
+
+**Park + handoff** (in an open session's ⋯ menu, while its cache is warm; it needs the hook) types
+`park handoff:` into the session: Claude writes a handoff, decisions and their why included, and
+parks it. Start fresh on that card begins from the handoff.
 
 **Start fresh** (`valet.py fresh <session_id>`, or the button on a card) starts a parked session
 over without its history, so none of it is written to the cache again: a new Claude in the card's

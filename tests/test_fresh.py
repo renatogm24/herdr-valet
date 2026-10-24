@@ -143,6 +143,17 @@ class Digest(unittest.TestCase):
         self.assertIn("1. hola", text)
         self.assertNotIn("## The repo now", text)
 
+    def test_context_file_starts_from_the_handoff_left_on_park(self):
+        p = transcript("d4", user("hola"), reply("2026-10-20T10:00:00Z", "a", w1h=10))
+        h = Path(TMP) / "d4-handoff.md"
+        h.write_text("# Handoff: X\n\n## Decisions\n- A because B\n")
+        card = {"session_id": "d4", "label": "proj", "cwd": TMP, "summary": "Title: Algo", "handoff": str(h)}
+        text = valet.fresh_context(card, p)
+        self.assertIn(f"## The handoff it wrote before parking ({h})", text)
+        self.assertIn("- A because B", text)
+        # A card that continued elsewhere: its handoff went to that session already.
+        self.assertNotIn("A because B", valet.fresh_context({**card, "continued_in": "d5"}, p))
+
     def test_continue_command_gets_the_old_sessions_id_and_profile(self):
         transcript("d3", user("hola"), reply("2026-10-20T10:00:00Z", "a", w1h=10))
         card = {"session_id": "d3", "label": "proj", "cwd": TMP, "model": "claude-opus-5-5",

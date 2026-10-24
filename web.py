@@ -173,7 +173,9 @@ class Handler(BaseHTTPRequestHandler):
             if action in PANE_ACTIONS:
                 if not PANE_RE.match(target):
                     raise ValueError("invalid pane")
-                if action == "park":
+                if action == "park" and parse_qs(url.query).get("handoff"):
+                    self._json(200, {"ok": True, **valet.park_handoff(target)})
+                elif action == "park":
                     self._json(200, {"ok": True, "card": valet.park(target, "manual")})
                 elif action == "recap":
                     self._json(200, {"ok": True, "recap": valet.recap(target)})

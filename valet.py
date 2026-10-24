@@ -1204,7 +1204,7 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
     if keep:
         return result
     park_args = [sys.executable, str(Path(__file__).resolve()), "park", pane_id, "--reason", "continued",
-                 "--continued-in", new_sid, "--handoff", str(path)]
+                 "--continued-in", new_sid, "--handoff", str(path), "--detached"]
     if pane_id == os.environ.get("HERDR_PANE_ID"):
         with open(os.devnull, "wb") as null:
             subprocess.Popen(park_args, stdin=null, stdout=null, stderr=null, start_new_session=True)
@@ -1341,6 +1341,10 @@ def fresh_context(c: dict, tr: Path) -> str:
         "",
         c.get("summary") or "(none)",
     ]
+    handoff = Path(c["handoff"]) if c.get("handoff") and not c.get("continued_in") else None
+    if handoff and handoff.is_file():
+        # Written by the session itself before it parked (Park + handoff): the why the rest lacks.
+        out += ["", f"## The handoff it wrote before parking ({handoff})", "", handoff.read_text().strip()]
     if d["compact"]:
         out += ["", "## Claude Code's summary from the session's last compaction", "", d["compact"]]
     if d["asked"]:
@@ -1693,6 +1697,8 @@ def title(c: dict) -> str:
 # message), or the context file of `fresh` when it is cold (no LLM, $0). The page, the CLI and the
 # hook (typing "relaunch:" in the session) all go through relaunch_plan and the same two ways.
 RELAUNCH_RE = re.compile(r"\s*relaunch(?:\s+(fresh|handoff))?\s*:(.*)", re.I | re.S)
+# Typed by the page's "Park + handoff": write a handoff, then park. Start fresh picks it up later.
+PARK_HANDOFF_RE = re.compile(r"\s*park\s+handoff\s*:?\s*", re.I)
 # What starting on something else sounds like, in Spanish and English: the dry run over a month of
 # sessions found these where Haiku, asked "same task or new?", either missed nearly every switch or
 # flagged one message in five.
@@ -1811,12 +1817,16 @@ def _ids_in(signals: list[str]) -> list[str]:
     return ["".join(_norm_id(s)) for s in signals if not s.startswith('"')]
 
 
-def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str) -> str:
+def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str, park_only: bool = False) -> str:
     """What the session is told when the user types "relaunch handoff:" (or plain "relaunch:" with a
-    warm cache): write a handoff for a Claude that saw none of this, then run `continue`."""
+    warm cache): write a handoff for a Claude that saw none of this, then run `continue`. With
+    `park_only` ("park handoff:"), park instead: the handoff waits on the card for Start fresh."""
     HANDOFFS.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = HANDOFFS / f"{session_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
-    cmd = [sys.executable, str(Path(__file__).resolve()), "continue", str(path), "--from", pane_id]
+    if park_only:
+        cmd = [sys.executable, str(Path(__file__).resolve()), "park", pane_id, "--handoff", str(path)]
+    else:
+        cmd = [sys.executable, str(Path(__file__).resolve()), "continue", str(path), "--from", pane_id]
     if request:
         cmd += ["--prompt-file", str(_request_file(session_id, request))]
     template = Path(CONF["handoff_template"]).expanduser() if CONF["handoff_template"] else None
@@ -1831,6 +1841,16 @@ def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str) 
         what = ("Short and specific: the goal and where things stand; decisions made and why; what was tried and "
                 "ruled out; open items and gotchas; the files, branches, PRs and commands that matter; and whatever "
                 "from this session the request below needs.")
+    if park_only:
+        return "\n".join([
+            "The user is parking this session and wants a handoff left on its card: a later session starts "
+            "from it (Start fresh) instead of this whole conversation.",
+            f"1. Write the handoff to {path}, in Markdown, for a Claude that has seen none of this conversation. "
+            f"{what} End it with this conversation's transcript, to grep for details: {tr}",
+            f"2. Run: {shlex.join(cmd)}",
+            "   It writes the card and closes this pane a few seconds later.",
+            "3. Answer in one line: the handoff's path.",
+        ])
     return "\n".join([
         'The user typed "relaunch:": this work moves to a new session that starts from a handoff instead of '
         "this whole conversation. Do not start on the request here.",
@@ -1875,6 +1895,10 @@ def hook(event: dict) -> dict | None:
     if not (sid and pane and tr and tr.is_file()):
         return None
     state = _relaunch_state(sid)
+    if PARK_HANDOFF_RE.fullmatch(prompt):
+        log(f"hook: parking {sid} with a handoff")
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                       "additionalContext": handoff_instructions(sid, tr, pane, "", park_only=True)}}
     m = RELAUNCH_RE.fullmatch(prompt)
     if m:
         # Plain "relaunch:" takes the message the hook just stopped.
@@ -1940,6 +1964,20 @@ def relaunch(pane_id: str | None, mode: str | None = None, request: str = "") ->
             break
         time.sleep(0.5)
     return {"mode": "fresh", **start_fresh(sid, request)}
+
+
+def park_handoff(pane_id: str) -> dict:
+    """Park, leaving a handoff on the card: type "park handoff:" into the session, so the hook has
+    Claude write one while its cache is warm and then run `park --handoff`. Start fresh starts from
+    it later. Needs the session idle and the hook."""
+    live = open_session(pane_id)
+    if live["status"] not in QUIET:
+        raise ValueError(f"{display_label(live)} is {live['status']}: wait for it to finish")
+    if not hook_installed():
+        raise ValueError("a handoff needs the hook (see the README: valet.py hook in Claude Code's settings)")
+    herdr("pane", "run", live["pane_id"], "park handoff:")
+    log(f"park {live['session_id']}: asked it for a handoff")
+    return {"session_id": live["session_id"]}
 
 
 # --------------------------------------------------------------------------- sync
@@ -2772,6 +2810,7 @@ def main() -> int:
     pk.add_argument("--reason", default="manual")
     pk.add_argument("--continued-in")
     pk.add_argument("--handoff")
+    pk.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)
     a = sub.add_parser("auto")
     a.add_argument("--days", type=float, default=CONF["idle_days"])
     a.add_argument("--dry-run", action="store_true")
@@ -2830,6 +2869,21 @@ def main() -> int:
             print(f"{s['pane_id']:<8} {s['label']:<22} {s['status']:<8} {s['idle_days'] or 0:6.1f} d  {s['session_id']}")
     elif args.cmd == "park":
         try:
+            if args.handoff:
+                h = Path(args.handoff).expanduser().resolve()
+                if not h.is_file():
+                    raise ValueError(f"handoff file not found: {h}")
+                if h.parent == HANDOFFS.resolve():
+                    h.chmod(0o600)
+                args.handoff = str(h)
+            # Run from inside the session it parks (Park + handoff): go on detached, the park kills this.
+            if args.pane_id == os.environ.get("HERDR_PANE_ID") and not args.detached:
+                argv = ["park", args.pane_id, "--reason", args.reason]
+                argv += ["--continued-in", args.continued_in] if args.continued_in else []
+                argv += ["--handoff", args.handoff] if args.handoff else []
+                detach(argv)
+                print("parking in a moment: Haiku writes the card, then this pane closes")
+                return 0
             extra = {k: v for k, v in (("continued_in", args.continued_in), ("handoff", args.handoff)) if v}
             print(json.dumps(park(args.pane_id, args.reason, extra), ensure_ascii=False, indent=2))
         except ValueError as e:
