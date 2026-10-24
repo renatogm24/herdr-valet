@@ -21,7 +21,7 @@ herdr-valet:
    button, open sessions with **Park**, and recently resumed ones. Works from a phone.
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
    included), with an alert when one is worth continuing in a fresh session (context past
-   `alert_context_tokens`, compacted `alert_compactions` times, or a cold cache whose next message
+   `alert_context_tokens`, or `alert_context_window_pct` of its window if less, compacted `alert_compactions` times, or a cold cache whose next message
    costs more than `alert_cold_usd`) and a **Relaunch** button next to it (see below), and a **Recap** of what each one is doing without
    closing it (parking right after reuses it). It also shows the **prompt cache**: how long it
    stays warm (Claude Code keeps it 1 h on a subscription, 5 min on an API key, counted from the
@@ -84,7 +84,8 @@ From inside a session, type `relaunch:` (the recommended way), `relaunch fresh:`
 ```
 
 Besides `relaunch:`, the hook stops a message once when the session is past
-`relaunch_context_tokens` (200k) and the message looks like new work: words that start something
+`relaunch_context_tokens` (200k, or `relaunch_context_window_pct` of its window if less: 120k on a
+200k window) and the message looks like new work: words that start something
 ("comencemos", "siguiente historia", "let's start", "next story", "today's report"…) or a story,
 ticket or finding id the session never mentioned (`PLATAPI-1234`, `F-016`, `AVIT…`; ids in pasted
 text don't count). It shows the plan; send the same message again to stay (that id won't stop a
