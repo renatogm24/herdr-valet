@@ -183,6 +183,7 @@
   .terminus .stop:hover { background: none; }
   .terminus .t { color: var(--muted); }
   .map-empty { padding: var(--u) calc(var(--u) * 2); color: var(--muted); font-size: 0.88rem; }
+  .btn .cost { margin-left: 6px; font-weight: 400; opacity: 0.75; font-size: 0.85em; }
   .map-filter { display: flex; align-items: center; gap: var(--u); padding: 2px calc(var(--u) * 2) var(--u); font-size: 0.78rem; color: var(--muted); }
   .map-filter select { font: inherit; color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 1px 4px; }
   .map-filter button { all: unset; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
@@ -464,6 +465,8 @@ function renderLive() {
     // a handoff (one message read from the cache) and the plain one waits in "⋯".
     const handoffPark = !working && ST.relaunch_hook && s.relaunch?.warm && (s.stats?.context_tokens || 0) >= ST.park_handoff_tokens;
     const handoffCost = s.relaunch?.handoff_usd == null ? "one message" : `≈ ${money(s.relaunch.handoff_usd)}`;
+    // Cold, a handoff re-reads the whole context first: offered, priced, never the default.
+    const coldHandoffPark = !working && ST.relaunch_hook && s.relaunch && !s.relaunch.warm && (s.stats?.context_tokens || 0) >= ST.park_handoff_tokens;
     // One action of its own at most: Park while idle; the rest wait behind "⋯". An alert brings
     // Relaunch, on its band. A working session shows only "⋯".
     const item = (act, label, hint, extra = "") => `<button role="menuitem" data-act="${act}" ${extra}>${label}<small>${hint}</small></button>`;
@@ -471,6 +474,7 @@ function renderLive() {
       item("recap", rc && shownRecaps.has(s.session_id) ? "Hide recap" : "Recap", rc && !rc.stale ? "Where it stands, written earlier" : "Haiku writes where it stands, ~15 s"),
       ...(working || alerts.length ? [] : [item("relaunch", "Relaunch", "Move the work to a new session that starts from the essentials, not this whole context")]),
       ...(handoffPark ? [item("park", "Park without handoff", "Only Haiku's card: for work that is done")] : []),
+      ...(coldHandoffPark ? [item("park-handoff", `Park + handoff · ${handoffCost}`, `Cache cold: Claude reads all ${ktok(s.stats.context_tokens)} again to write a handoff, then it parks; Start fresh begins from it`)] : []),
       item("fork", "Fork", "A copy of the conversation in a new tab, to ask something else there"),
       ...(working ? [] : [item("restart", "Restart", "Close Claude and reopen this conversation: loads updates, MCPs and plugins")]),
       ...switches.map((p) => item("switch", `Move to ${esc(p.label)}`, `Close it here and reopen the same conversation on ${esc(p.label)}`, `data-as="${esc(p.name)}"`)),
@@ -714,6 +718,9 @@ function renderDetail() {
   const p = project(c.label);
   const advice = freshAdvice(c.stats);
   const handoff = c.handoff && !c.continued_in;
+  // A parked card's cache is cold: resuming writes the whole context again. Start fresh reads a
+  // context file of a few thousand tokens, cents.
+  const resumeCost = c.stats?.cache?.cold_usd != null ? `≈ ${money(c.stats.cache.cold_usd)}` : "";
   const sub = c.label.includes("/") ? c.label.split("/").slice(1).join("/") : "";
   d.style.setProperty("--line", lineColor(p));
   d.innerHTML = `
@@ -730,9 +737,9 @@ function renderDetail() {
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
     ${advice ? `<p class="advice">${esc(advice)}</p>` : ""}
     <div class="actions">
-      <button class="btn ${advice || handoff ? "" : "primary"}" data-act="resume">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}<kbd>↵</kbd></button>
+      <button class="btn ${advice || handoff ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeCost ? `: its ${ktok(c.stats.context_tokens)} tokens are written to the cache again (${resumeCost})` : ""}">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}${resumeCost ? `<span class="cost">${resumeCost}</span>` : ""}<kbd>↵</kbd></button>
       ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
-      <button class="btn ${advice || handoff ? "primary" : ""}" data-act="fresh" title="A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">Start fresh</button>
+      <button class="btn ${advice || handoff ? "primary" : ""}" data-act="fresh" title="Costs cents: the new session reads a short context file, not the conversation. A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">${handoff ? "Start fresh from handoff" : "Start fresh"}<span class="cost">&lt; $0.15</span></button>
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>
