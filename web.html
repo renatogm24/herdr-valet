@@ -386,13 +386,18 @@ function cacheHtml(st) {
   }
   return `<span class="cache cold" title="Prompt cache (${c.ttl}) expired ${ago(c.expires_at)}: resuming writes all ${ktok(st.context_tokens)} tokens of context again${cold}. Start fresh begins without them.">cold${cold}</span>`;
 }
+// Whether the prompt cache still holds the context: resuming then reads it for cents.
+function cacheWarm(st) {
+  return !!st?.cache && Date.parse(st.cache.expires_at) > Date.now();
+}
 // Whether a parked session is better started fresh than resumed: its context is past the limit, or
-// resuming re-sends more than alert_cold_usd (a parked card's cache is always cold by then).
+// resuming re-sends more than alert_cold_usd (only once the cache is cold: parked within its TTL,
+// resuming reads the context from it).
 function freshAdvice(st) {
   if (!st) return "";
   const why = [];
   if (st.context_tokens >= (st.alert_context_tokens ?? ST.alert_context_tokens)) why.push(`${ktok(st.context_tokens)} tokens of context`);
-  if (st.cache?.cold_usd != null && st.cache.cold_usd >= ST.alert_cold_usd) why.push(`resuming re-sends it all (≈ ${money(st.cache.cold_usd)})`);
+  if (!cacheWarm(st) && st.cache?.cold_usd != null && st.cache.cold_usd >= ST.alert_cold_usd) why.push(`resuming re-sends it all (≈ ${money(st.cache.cold_usd)})`);
   return why.length ? `${why.join("; ")}: Start fresh picks it up from this card instead.` : "";
 }
 function summaryHtml(text) {
@@ -718,9 +723,17 @@ function renderDetail() {
   const p = project(c.label);
   const advice = freshAdvice(c.stats);
   const handoff = c.handoff && !c.continued_in;
-  // A parked card's cache is cold: resuming writes the whole context again. Start fresh reads a
-  // context file of a few thousand tokens, cents.
-  const resumeCost = c.stats?.cache?.cold_usd != null ? `≈ ${money(c.stats.cache.cold_usd)}` : "";
+  // Parked within the cache's TTL, resuming reads the context from it, cents, and keeps all of it:
+  // Resume leads, even over a handoff. Once it is cold, resuming writes the whole context again and
+  // Start fresh, which reads a context file of a few thousand tokens, leads if there is a reason.
+  const cache = c.stats?.cache;
+  const warm = cacheWarm(c.stats);
+  const resumeUsd = cache ? (warm ? cache.warm_usd : cache.cold_usd) : null;
+  const resumeCost = resumeUsd != null ? `≈ ${money(resumeUsd)}` : "";
+  const resumeWhy = !resumeCost ? ""
+    : warm ? `: the cache is warm for ${Math.ceil((Date.parse(cache.expires_at) - Date.now()) / 60000)} more min, so its ${ktok(c.stats.context_tokens)} tokens are read from it (${resumeCost})`
+    : `: its ${ktok(c.stats.context_tokens)} tokens are written to the cache again (${resumeCost})`;
+  const freshFirst = advice || (handoff && !warm);
   const sub = c.label.includes("/") ? c.label.split("/").slice(1).join("/") : "";
   d.style.setProperty("--line", lineColor(p));
   d.innerHTML = `
@@ -737,9 +750,9 @@ function renderDetail() {
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
     ${advice ? `<p class="advice">${esc(advice)}</p>` : ""}
     <div class="actions">
-      <button class="btn ${advice || handoff ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeCost ? `: its ${ktok(c.stats.context_tokens)} tokens are written to the cache again (${resumeCost})` : ""}">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}${resumeCost ? `<span class="cost">${resumeCost}</span>` : ""}<kbd>↵</kbd></button>
+      <button class="btn ${freshFirst ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeWhy}">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}${resumeCost ? `<span class="cost">${resumeCost}</span>` : ""}<kbd>↵</kbd></button>
       ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
-      <button class="btn ${advice || handoff ? "primary" : ""}" data-act="fresh" title="Costs cents: the new session reads a short context file, not the conversation. A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">${handoff ? "Start fresh from handoff" : "Start fresh"}<span class="cost">&lt; $0.15</span></button>
+      <button class="btn ${freshFirst ? "primary" : ""}" data-act="fresh" title="Costs cents: the new session reads a short context file, not the conversation. A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">${handoff ? "Start fresh from handoff" : "Start fresh"}<span class="cost">&lt; $0.15</span></button>
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>
