@@ -93,6 +93,7 @@ def state() -> dict:
         "closed_keep_days": valet.CONF["closed_keep_days"],
         # Without the hook, Relaunch only offers fresh: a handoff is the hook telling the session what to do.
         "relaunch_hook": valet.hook_installed(),
+        "park_handoff_tokens": valet.CONF["park_handoff_tokens"],
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),

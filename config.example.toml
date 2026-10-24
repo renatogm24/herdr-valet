@@ -62,6 +62,9 @@
 # when "relaunch:" came with a request ({handoff} = handoff or context file, {request} = the request).
 # relaunch_context_tokens = 200000
 # relaunch_context_window_pct = 60.0   # cap: before auto-compaction and before the alert
+
+# The page's Park becomes "Park + handoff" while the cache is warm and the session is this big.
+# park_handoff_tokens = 50000
 # relaunch_prompt = "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}"
 # The handoff a relaunch asks for follows this template (the handoff skill's); "" or a missing file
 # falls back to a short list of what to cover.

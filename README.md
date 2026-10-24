@@ -55,9 +55,10 @@ herdr-valet:
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
 
-**Park + handoff** (in an open session's ⋯ menu, while its cache is warm; it needs the hook) types
-`park handoff:` into the session: Claude writes a handoff, decisions and their why included, and
-parks it. Start fresh on that card begins from the handoff.
+**Park + handoff**: an open session's Park becomes this while its cache is warm and it is past
+`park_handoff_tokens` (50k); it needs the hook. It types `park handoff:` into the session: Claude
+writes a handoff, decisions and their why included, and parks it. Start fresh on that card begins
+from the handoff. The plain Park waits in ⋯ ("Park without handoff"), for work that is done.
 
 **Start fresh** (`valet.py fresh <session_id>`, or the button on a card) starts a parked session
 over without its history, so none of it is written to the cache again: a new Claude in the card's

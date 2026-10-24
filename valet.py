@@ -132,6 +132,10 @@ DEFAULTS = {
     # alert, since it only speaks up once and only on new work.
     "relaunch_context_tokens": 200000,
     "relaunch_context_window_pct": 60.0,
+    # The page's Park becomes "Park + handoff" (Claude writes a handoff first, Start fresh begins from
+    # it) while the cache is warm, the hook is in and the session is at least this big. Smaller ones
+    # resume cheaply and the card is enough.
+    "park_handoff_tokens": 50000,
     # First message of the new session when "relaunch:" came with a request. {handoff} is the
     # handoff or context file, {request} what the user typed (or the file it went to, if long).
     "relaunch_prompt": "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}",
