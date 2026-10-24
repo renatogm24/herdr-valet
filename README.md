@@ -59,6 +59,9 @@ herdr-valet:
 `park_handoff_tokens` (50k); it needs the hook. It types `park handoff:` into the session: Claude
 writes a handoff, decisions and their why included, and parks it. Start fresh on that card begins
 from the handoff. The plain Park waits in ⋯ ("Park without handoff"), for work that is done.
+A card parked within its cache's TTL leads with Resume instead, handoff or not: it reads the
+context from the cache for cents and keeps all of it. The price on Resume follows the cache: a
+cache read while it is warm, the whole context written again once it is cold.
 
 **Start fresh** (`valet.py fresh <session_id>`, or the button on a card) starts a parked session
 over without its history, so none of it is written to the cache again: a new Claude in the card's
