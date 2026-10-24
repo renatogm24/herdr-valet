@@ -120,6 +120,16 @@ DEFAULTS = {
     # continue_command; this is its first message ({handoff} is the context file's path).
     "fresh_prompt": "Pick up the work of an earlier session from {handoff}: read it first, say in a few lines where "
                     "things stand and what the next step is, then wait for the user.",
+    # `relaunch`: move an open session's work to a new one that starts from the essentials instead of
+    # the whole conversation. Two ways: a handoff Claude writes in the old session (keeps the why; one
+    # message, cheap while the prompt cache is warm, the whole context written again once it is cold),
+    # or the context file of `fresh` (valet writes it, no LLM, $0). The hook (`valet.py hook`) stops a
+    # message that looks like new work once a session is past this many tokens. Provisional: a model
+    # with a 200k window compacts around there anyway.
+    "relaunch_context_tokens": 200000,
+    # First message of the new session when "relaunch:" came with a request. {handoff} is the
+    # handoff or context file, {request} what the user typed (or the file it went to, if long).
+    "relaunch_prompt": "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}",
     # Sessions closed by hand (pane closed, Claude exited) get a card too; it goes away on its own
     # after this many days.
     "closed_keep_days": 7.0,
@@ -200,6 +210,10 @@ LOG = DATA / "valet.log"
 RECAPS = DATA / "recaps"
 # Context files of sessions started fresh: data_dir/fresh/<session_id>.md.
 FRESH = DATA / "fresh"
+# relaunch: handoffs Claude writes (handoffs/<session_id>-<time>.md) and what the hook keeps per
+# session (relaunch/<session_id>.json: the message it stopped, the work ids already let through).
+HANDOFFS = DATA / "handoffs"
+RELAUNCH = DATA / "relaunch"
 # Each Claude account keeps its conversations in its config dir: the default one and those used
 # through CLAUDE_CONFIG_DIR (convention: ~/.claude-<something>).
 DEFAULT_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or HOME / ".claude")
@@ -1078,10 +1092,12 @@ def chains() -> dict:
         return {}
 
 
-def continue_session(handoff: str, pane_id: str | None = None, keep: bool = False, wait_s: float = 90) -> dict:
+def continue_session(handoff: str, pane_id: str | None = None, keep: bool = False, wait_s: float = 90,
+                     request: str = "") -> dict:
     """Hand a long conversation over to a fresh one. Opens a tab in the old session's workspace
-    and directory running continue_command, whose first message points at the handoff file; waits
-    until Claude reports a session in it; then parks the old one, its card saying where it went.
+    and directory running continue_command, whose first message points at the handoff file (and
+    carries `request`, what the user wants done next, if any); waits until Claude reports a session
+    in it; then parks the old one, its card saying where it went.
 
     Meant to be run from inside the old session (the pane defaults to $HERDR_PANE_ID): closing
     that pane would kill this process, so the park runs detached and this returns before it."""
@@ -1091,6 +1107,8 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
     path = Path(handoff).expanduser().resolve()
     if not path.is_file():
         raise ValueError(f"handoff file not found: {path}")
+    if path.parent == HANDOFFS.resolve():
+        path.chmod(0o600)  # Claude wrote it with the default mode; it holds the session's work
     if not herdr_running():
         raise HerdrDown("start herdr first")
     old = next((s for s in live_sessions() if s["pane_id"] == pane_id), None)
@@ -1099,7 +1117,7 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
     tr = transcript_path(old["session_id"])
     cwd = old["cwd"] or str(HOME)
     values = {
-        "prompt": CONF["continue_prompt"].format(handoff=path),
+        "prompt": first_message(path, request, "continue_prompt"),
         "model": (requested_model(tr) or last_model(tr)) if tr else "",
         "cwd": cwd,
         "handoff": str(path),
@@ -1288,11 +1306,27 @@ def fresh_context(c: dict, tr: Path) -> str:
     return redact("\n".join(out)) + "\n"
 
 
-def start_fresh(session_id: str) -> dict:
+def first_message(handoff: Path, request: str, default: str) -> str:
+    """The new session's first message: CONF[default] on its own, or relaunch_prompt with the
+    user's request. A request of several lines or a long one goes to a file next to the handoff:
+    it travels through a shell command typed into a pane."""
+    request = request.strip()
+    if not request:
+        return CONF[default].format(handoff=handoff)
+    if "\n" in request or len(request) > 1000:
+        f = handoff.with_name(f"{handoff.stem}.request.md")
+        f.write_text(request + "\n")
+        f.chmod(0o600)
+        request = f"it is in {f}"
+    return CONF["relaunch_prompt"].format(handoff=handoff, request=request)
+
+
+def start_fresh(session_id: str, request: str = "") -> dict:
     """Start a parked session over in herdr without its history: a new Claude in the card's
     directory, with the model it ran, whose first message points at a context file written from
-    the card and the transcript (see fresh_context). Nothing of the old conversation is re-cached.
-    The card moves to history, saying where the context file is."""
+    the card and the transcript (see fresh_context), and carries `request` if there is one.
+    Nothing of the old conversation is re-cached. The card moves to history, saying where the
+    context file is."""
     c = json.loads(card_path(session_id).read_text())
     target = current_session(session_id)
     tr = transcript_path(target)
@@ -1305,7 +1339,7 @@ def start_fresh(session_id: str) -> dict:
     path.write_text(fresh_context({**c, "session_id": target}, tr))
     path.chmod(0o600)
     values = {
-        "prompt": CONF["fresh_prompt"].format(handoff=path),
+        "prompt": first_message(path, request, "fresh_prompt"),
         "model": requested_model(tr) or c.get("model") or "",
         "cwd": c["cwd"] or str(HOME),
         "handoff": str(path),
@@ -1590,6 +1624,253 @@ def title(c: dict) -> str:
             if line.startswith(label):
                 return line[len(label):].strip()
     return ""
+
+
+# --------------------------------------------------------------------------- relaunch
+# Moving on to other work inside a long session re-reads all of the old work with every message,
+# warm cache or cold. `relaunch` moves it to a new session that starts from the essentials: a
+# handoff Claude writes in the old session while its cache is warm (keeps the why, costs one
+# message), or the context file of `fresh` when it is cold (no LLM, $0). The page, the CLI and the
+# hook (typing "relaunch:" in the session) all go through relaunch_plan and the same two ways.
+RELAUNCH_RE = re.compile(r"\s*relaunch(?:\s+(fresh|handoff))?\s*:(.*)", re.I | re.S)
+# What starting on something else sounds like, in Spanish and English: the dry run over a month of
+# sessions found these where Haiku, asked "same task or new?", either missed nearly every switch or
+# flagged one message in five.
+NEW_WORK = re.compile(
+    r"\b(comencemos|empecemos|arranquemos|(?:comenzar|empezar|arrancar)\s+(?:con|a\s+trabajar|el|la|los|las)|"
+    r"(?:la\s+|el\s+)?siguiente\s+(?:historia|tarea|ticket|story|finding)|nueva\s+tarea|otra\s+tarea|otras\s+historias|"
+    r"pasemos\s+a|otro\s+tema|estamos\s+(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)|reportes?\s+de\s+hoy|"
+    r"let'?s\s+(?:start|begin|move\s+on|switch|work\s+on)|start\s+(?:on|with|working\s+on)|"
+    r"next\s+(?:story|ticket|task|finding|issue)|new\s+task|another\s+task|moving\s+on|move\s+on\s+to|switching\s+to|"
+    r"today'?s\s+(?:reports?|run))\b", re.I)
+# A story, ticket or finding: PLATAPI-15880, F-016, AVIT0079378. Uppercase only for the first kind,
+# so utf-8 and sha-256 in prose don't count (UTF-8 still would, which is what the stoplist is for).
+WORK_ID = re.compile(r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|[Ff]-?\d{2,4}|(?i:avit)\d{4,})\b")
+WORK_ID_STOP = {"utf", "sha", "iso", "tls", "http", "gpt", "rfc"}
+PASTED = re.compile(r"<pasted_content\b.*?</pasted_content>", re.S)
+# Of a long transcript, the end is enough to know the context and the cache.
+TAIL_BYTES = 512 * 1024
+# What a handoff costs to write, on top of reading the context: about this many output tokens.
+HANDOFF_OUTPUT = 4000
+# After a stopped message is sent again, keywords stay quiet this long (work ids, for good).
+RELAUNCH_QUIET_S = 1800
+
+
+def tail_stats(tr: Path) -> _FileStats:
+    """The context, model and prompt cache from the end of the transcript only: the hook runs on
+    every message and a long transcript weighs tens of MB."""
+    st = _FileStats()
+    st.offset = max(0, tr.stat().st_size - TAIL_BYTES)  # the cut first line fails to parse: skipped
+    st.feed(tr, True)
+    return st
+
+
+def relaunch_plan(st: _FileStats) -> dict:
+    """What relaunch recommends now and what it costs. Warm cache: a handoff, since it keeps the
+    why and costs a message that reads the context from the cache plus what it writes. Cold: fresh,
+    $0; a handoff would first write the whole context to the cache again (its price says so)."""
+    cache = cache_state(st)
+    warm = bool(cache) and datetime.fromisoformat(cache["expires_at"]) > datetime.now(timezone.utc)
+    pr = price(st.model)
+    handoff_usd = None
+    if cache and pr and cache["warm_usd"] is not None:
+        handoff_usd = round((cache["warm_usd"] if warm else cache["cold_usd"]) + HANDOFF_OUTPUT * pr[1] / 1e6, 2)
+    return {
+        "recommended": "handoff" if warm else "fresh",
+        "warm": warm,
+        "expires_at": cache["expires_at"] if cache else None,
+        "context_tokens": st.context,
+        "handoff_usd": handoff_usd,
+    }
+
+
+def hook_installed() -> bool:
+    """Whether Claude Code runs `valet.py hook` (handoffs go through it: it tells the session what
+    to do with "relaunch handoff:")."""
+    for base in CONFIG_DIRS:
+        try:
+            if re.search(r"(herdr-valet|valet\.py)\s+hook\b", (base / "settings.json").read_text()):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _relaunch_state(session_id: str) -> dict:
+    try:
+        return json.loads((RELAUNCH / f"{session_id}.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_relaunch_state(session_id: str, state: dict) -> None:
+    RELAUNCH.mkdir(parents=True, exist_ok=True)
+    (RELAUNCH / f"{session_id}.json").write_text(json.dumps(state, ensure_ascii=False))
+
+
+def _request_file(session_id: str, request: str) -> Path:
+    """The request saved for a detached process or a command Claude runs: no quoting to get wrong."""
+    RELAUNCH.mkdir(parents=True, exist_ok=True)
+    f = RELAUNCH / f"{session_id}.request"
+    f.write_text(request)
+    f.chmod(0o600)
+    return f
+
+
+def _norm_id(raw: str) -> tuple[str, str]:
+    """("f", "16") for F-016, f016 and F-16; ("platapi", "15880") for PLATAPI-15880."""
+    m = re.fullmatch(r"([a-z]+)-?0*(\d+)", raw.lower())
+    return (m.group(1), m.group(2)) if m else (raw.lower(), "")
+
+
+def new_work_signals(prompt: str, tr: Path, state: dict) -> list[str]:
+    """Why a message looks like new work: words that start something, and work ids the session has
+    never mentioned. Only the user's own words count: a pasted Slack thread names ids in passing."""
+    own = PASTED.sub(" ", prompt)
+    found = []
+    m = NEW_WORK.search(own)
+    if m and time.time() >= state.get("quiet_until", 0):
+        found.append(f'"{m.group(0)}"')
+    acked = set(state.get("acked", []))
+    ids = {}
+    for raw in WORK_ID.findall(own):
+        letters, num = _norm_id(raw)
+        key = f"{letters}{num}"
+        if num and letters not in WORK_ID_STOP and key not in acked:
+            ids.setdefault(key, (raw, letters, num))
+    if ids:
+        # This very message may already be in the transcript: it does not count as a mention.
+        text = tr.read_text(errors="replace").replace(json.dumps(prompt, ensure_ascii=False)[1:-1], "")
+        for raw, letters, num in ids.values():
+            if not re.search(rf"(?i)\b{re.escape(letters)}-?0*{num}\b", text):
+                found.append(raw)
+    return found
+
+
+def _ids_in(signals: list[str]) -> list[str]:
+    return ["".join(_norm_id(s)) for s in signals if not s.startswith('"')]
+
+
+def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str) -> str:
+    """What the session is told when the user types "relaunch handoff:" (or plain "relaunch:" with a
+    warm cache): write a handoff for a Claude that saw none of this, then run `continue`."""
+    HANDOFFS.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path = HANDOFFS / f"{session_id}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+    cmd = [sys.executable, str(Path(__file__).resolve()), "continue", str(path), "--from", pane_id]
+    if request:
+        cmd += ["--prompt-file", str(_request_file(session_id, request))]
+    return "\n".join([
+        'The user typed "relaunch:": this work moves to a new session that starts from a handoff instead of '
+        "this whole conversation. Do not start on the request here.",
+        f"1. Write the handoff to {path}, in Markdown, for a Claude that has seen none of this conversation. "
+        "Short and specific: the goal and where things stand; decisions made and why; what was tried and "
+        "ruled out; open items and gotchas; the files, branches, PRs and commands that matter; and whatever "
+        f"from this session the request below needs. End it with this conversation's transcript, to grep "
+        f"for details: {tr}",
+        f"2. Run: {shlex.join(cmd)}",
+        "   It opens a tab next to this one where a new Claude starts on the handoff"
+        + (" and the request" if request else "") + ", then parks this session.",
+        "3. Answer in one line: where the work went.",
+        f"The request for the new session (do not act on it here): {request or 'none, it reads the handoff and waits.'}",
+    ])
+
+
+def _block_message(plan: dict, signals: list[str]) -> str:
+    if plan["warm"]:
+        left = (datetime.fromisoformat(plan["expires_at"]) - datetime.now(timezone.utc)).total_seconds() / 60
+        cache = f"Cache warm ({max(1, round(left))} min left)"
+    else:
+        cache = "Cache cold"
+    handoff = f"≈ ${plan['handoff_usd']:.2f}" if plan["handoff_usd"] is not None else "one message"
+    rec = f"handoff + continue ({handoff})" if plan["recommended"] == "handoff" else "fresh ($0)"
+    return "\n".join([
+        f"⏸ This looks like new work ({', '.join(signals)}), and this session is at "
+        f"{round(plan['context_tokens'] / 1000)}k tokens: every message here re-reads all of it.",
+        f"{cache}: recommended {rec}.",
+        "  relaunch:          the recommended one, with the message you just wrote",
+        "  relaunch fresh:    valet writes the context file, no Claude ($0)",
+        f"  relaunch handoff:  Claude writes a handoff here first ({handoff})",
+        "Or send the same message again to stay in this session.",
+    ])
+
+
+def hook(event: dict) -> dict | None:
+    """Claude Code's UserPromptSubmit hook: the JSON to print, or None to let the message through.
+    "relaunch[ fresh| handoff]: <request>" relaunches this session; any other message that looks
+    like new work in a session past relaunch_context_tokens is stopped once, with the plan. Only
+    inside herdr, where there is a tab to open."""
+    prompt = event.get("prompt") or ""
+    sid = event.get("session_id")
+    pane = os.environ.get("HERDR_PANE_ID")
+    tr = Path(event["transcript_path"]) if event.get("transcript_path") else (transcript_path(sid) if sid else None)
+    if not (sid and pane and tr and tr.is_file()):
+        return None
+    state = _relaunch_state(sid)
+    m = RELAUNCH_RE.fullmatch(prompt)
+    if m:
+        # Plain "relaunch:" takes the message the hook just stopped.
+        request = m.group(2).strip() or state.get("prompt", "")
+        mode = (m.group(1) or "").lower() or relaunch_plan(tail_stats(tr))["recommended"]
+        _save_relaunch_state(sid, {k: v for k, v in state.items() if k != "prompt"})
+        if mode == "fresh":
+            argv = ["relaunch", pane, "--mode", "fresh"]
+            if request:
+                argv += ["--prompt-file", str(_request_file(sid, request))]
+            detach(argv)
+            log(f"hook: relaunching {sid} fresh")
+            return {"decision": "block", "reason": "Relaunching fresh: this session parks (Haiku writes its card, "
+                    "~15 s) and a new one opens in a tab next to it. Nothing was sent to Claude."}
+        log(f"hook: relaunching {sid} with a handoff")
+        return {"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
+                                       "additionalContext": handoff_instructions(sid, tr, pane, request)}}
+    if state.get("prompt") and prompt.strip() == state["prompt"]:
+        # Sent again: stay. Its ids never stop a message again; its words, not for a while.
+        state["acked"] = sorted(set(state.get("acked", [])) | set(state.get("signals", [])))
+        state["quiet_until"] = time.time() + RELAUNCH_QUIET_S
+        state.pop("prompt", None)
+        _save_relaunch_state(sid, state)
+        return None
+    st = tail_stats(tr)
+    if st.context < CONF["relaunch_context_tokens"]:
+        return None
+    signals = new_work_signals(prompt, tr, state)
+    if not signals:
+        return None
+    plan = relaunch_plan(st)
+    _save_relaunch_state(sid, {**state, "prompt": prompt.strip(), "signals": _ids_in(signals)})
+    log(f"hook: stopped a message in {sid} ({', '.join(signals)}, {st.context} tokens)")
+    return {"decision": "block", "reason": _block_message(plan, signals)}
+
+
+def relaunch(pane_id: str | None, mode: str | None = None, request: str = "") -> dict:
+    """Relaunch an open session from the page or the CLI. fresh: park it (the card is what the new
+    session starts from) and start fresh. handoff: type "relaunch handoff: <request>" into it, so the
+    hook has Claude write the handoff and run `continue`; it needs the session idle and the hook."""
+    live = open_session(pane_id)
+    tr = transcript_path(live["session_id"])
+    if not tr:
+        raise ValueError("this session has no conversation yet: nothing to relaunch")
+    if not mode:
+        mode = relaunch_plan(_file_stats(tr, True))["recommended"]
+        if mode == "handoff" and not hook_installed():
+            mode = "fresh"  # what the page offers without the hook too
+    request = request.strip()
+    if mode == "handoff":
+        if live["status"] not in QUIET:
+            raise ValueError(f"{display_label(live)} is {live['status']}: wait for it to finish")
+        if not hook_installed():
+            raise ValueError("a handoff needs the hook (see the README: valet.py hook in Claude Code's settings)")
+        # Typed into a terminal: one line.
+        herdr("pane", "run", live["pane_id"], f"relaunch handoff: {' '.join(request.split())}".rstrip())
+        log(f"relaunch {live['session_id']}: asked it for a handoff")
+        return {"mode": "handoff", "session_id": live["session_id"]}
+    card = park(live["pane_id"], "relaunched")
+    sid = card["session_id"]
+    for _ in range(20):  # the parked Claude got SIGTERM: give it a moment to release the transcript
+        if not session_owners(sid):
+            break
+        time.sleep(0.5)
+    return {"mode": "fresh", **start_fresh(sid, request)}
 
 
 # --------------------------------------------------------------------------- sync
@@ -2433,6 +2714,7 @@ def main() -> int:
     fr = sub.add_parser("fresh")
     fr.add_argument("session_id")
     fr.add_argument("--print", action="store_true", help="only print the context file it would start from")
+    fr.add_argument("--prompt", default="", help="what the new session should do, after reading the context file")
     sw = sub.add_parser("switch")
     sw.add_argument("pane_id")
     sw.add_argument("--as", dest="profile", required=True)
@@ -2440,6 +2722,14 @@ def main() -> int:
     co.add_argument("handoff")
     co.add_argument("--from", dest="pane_id")
     co.add_argument("--keep", action="store_true", help="leave the old session open")
+    co.add_argument("--prompt-file", help="what the new session should do next, after reading the handoff")
+    rl = sub.add_parser("relaunch")
+    rl.add_argument("pane_id", nargs="?", help="default: $HERDR_PANE_ID")
+    rl.add_argument("--mode", choices=("fresh", "handoff"), help="default: handoff while the cache is warm, else fresh")
+    rl.add_argument("--prompt", default="", help="the new session's request")
+    rl.add_argument("--prompt-file", help="the same, from a file")
+    rl.add_argument("--detached", action="store_true", help=argparse.SUPPRESS)
+    sub.add_parser("hook", help="Claude Code UserPromptSubmit hook: reads the event on stdin")
     for name in ("restart", "fork"):
         x = sub.add_parser(name)
         x.add_argument("pane_id", nargs="?", help="default: $HERDR_PANE_ID")
@@ -2511,7 +2801,7 @@ def main() -> int:
                     "model": last_model(tr), "last_activity": mtime_iso(tr)}
                 print(fresh_context({**c, "session_id": tr.stem}, tr), end="")
             else:
-                print(json.dumps(start_fresh(args.session_id), ensure_ascii=False))
+                print(json.dumps(start_fresh(args.session_id, args.prompt), ensure_ascii=False))
         except HerdrDown as e:
             print(f"herdr is not running; by hand: {e}", file=sys.stderr)
             return 1
@@ -2520,7 +2810,8 @@ def main() -> int:
             return 1
     elif args.cmd == "continue":
         try:
-            r = continue_session(args.handoff, args.pane_id, args.keep)
+            request = Path(args.prompt_file).read_text() if args.prompt_file else ""
+            r = continue_session(args.handoff, args.pane_id, args.keep, request=request)
         except HerdrDown as e:
             print(f"herdr is not running: {e}", file=sys.stderr)
             return 1
@@ -2540,6 +2831,36 @@ def main() -> int:
         except ValueError as e:
             print(e, file=sys.stderr)
             return 1
+    elif args.cmd == "relaunch":
+        request = Path(args.prompt_file).read_text() if args.prompt_file else args.prompt
+        try:
+            live = open_session(args.pane_id)
+            # Run from inside the session it parks: check, then go on detached (the park kills this).
+            if live["pane_id"] == os.environ.get("HERDR_PANE_ID") and not args.detached:
+                if args.mode == "handoff":
+                    raise ValueError('from inside the session, type "relaunch handoff: <request>" instead')
+                f = _request_file(live["session_id"], request)
+                detach(["relaunch", live["pane_id"], "--mode", "fresh", "--prompt-file", str(f)])
+                print(f"relaunching {display_label(live)} fresh: it parks in a moment and a new tab opens next to it")
+                return 0
+            print(json.dumps(relaunch(live["pane_id"], args.mode, request), ensure_ascii=False))
+        except HerdrDown as e:
+            print(f"herdr is not running: {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:
+            if args.detached:
+                log(f"relaunch failed: {e}")
+            print(e, file=sys.stderr)
+            return 1
+    elif args.cmd == "hook":
+        # Never in the way of a message: whatever goes wrong here lets it through.
+        try:
+            out = hook(json.loads(sys.stdin.read() or "{}"))
+        except Exception as e:  # noqa: BLE001
+            log(f"hook failed: {e.__class__.__name__}: {e}")
+            out = None
+        if out:
+            print(json.dumps(out, ensure_ascii=False))
     elif args.cmd == "recap":
         try:
             print(recap(args.pane_id)["summary"])
