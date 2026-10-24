@@ -93,12 +93,15 @@ DEFAULTS = {
     # Any other model uses context_window, and a session seen above it is taken to run with 1M.
     "context_windows": "claude-opus-5-5:1000000",
     "context_window": 200000,
-    # Alerts on open sessions, each a reason to continue in a fresh one. Context in tokens: auto-compaction
-    # has fired anywhere from ~200k up (most often 200k-400k), whatever the window, so a % of 1M says
-    # nothing; the page's context gauge fills up to this too. At 200k most open sessions were in alert,
-    # and an alert that is always on stops being read. Compactions: how many before a session counts as worn.
-    # Cold cache: what the next message costs (list prices) once the prompt cache has expired.
+    # Alerts on open sessions, each a reason to continue in a fresh one. Context in tokens: on a 1M window
+    # auto-compaction has fired anywhere from ~200k up (most often 200k-400k), so a % of 1M says nothing;
+    # the page's context gauge fills up to this too. At 200k most open sessions were in alert, and an
+    # alert that is always on stops being read. A 200k window compacts at ~167k (25 of 36 auto-compactions
+    # seen), before 300k is ever reached: the limit is capped at this % of the session's window.
+    # Compactions: how many before a session counts as worn. Cold cache: what the next message costs
+    # (list prices) once the prompt cache has expired.
     "alert_context_tokens": 300000,
+    "alert_context_window_pct": 75.0,
     "alert_compactions": 3,
     "alert_cold_usd": 2.0,
     # No longer read (the alerts above replaced them); kept so configs that set them still load.
@@ -124,9 +127,11 @@ DEFAULTS = {
     # the whole conversation. Two ways: a handoff Claude writes in the old session (keeps the why; one
     # message, cheap while the prompt cache is warm, the whole context written again once it is cold),
     # or the context file of `fresh` (valet writes it, no LLM, $0). The hook (`valet.py hook`) stops a
-    # message that looks like new work once a session is past this many tokens. Provisional: a model
-    # with a 200k window compacts around there anyway.
+    # message that looks like new work once a session is past this many tokens, or this % of its window
+    # if that is less: it has to come before auto-compaction (~167k on a 200k window) and before the
+    # alert, since it only speaks up once and only on new work.
     "relaunch_context_tokens": 200000,
+    "relaunch_context_window_pct": 60.0,
     # First message of the new session when "relaunch:" came with a request. {handoff} is the
     # handoff or context file, {request} what the user typed (or the file it went to, if long).
     "relaunch_prompt": "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}",
@@ -1610,6 +1615,12 @@ def context_window(model: str, peak: int) -> int:
     return 1_000_000 if peak > window else window
 
 
+def context_limit(key: str, window: int) -> int:
+    """`key` (alert_ or relaunch_context_tokens), capped at its _window_pct of the session's window."""
+    pct = CONF[key.replace("_tokens", "_window_pct")]
+    return min(int(CONF[key]), int(window * float(pct) / 100)) if window else int(CONF[key])
+
+
 CACHE_TTL = {"1h": 3600, "5m": 300}
 
 
@@ -1641,7 +1652,8 @@ def stats(tr: Path) -> dict:
     # Reasons to continue in a fresh session, not a tally of what was spent: the money already gone
     # is no reason to stop, what the next message costs and how worn the context is are.
     alerts = []
-    if main.context >= CONF["alert_context_tokens"]:
+    limit = context_limit("alert_context_tokens", window)
+    if main.context >= limit:
         alerts.append(f"{round(main.context / 1000)}k tokens of context")
     if main.compactions >= CONF["alert_compactions"]:
         alerts.append(f"compacted {main.compactions}x")
@@ -1652,6 +1664,7 @@ def stats(tr: Path) -> dict:
         "context_tokens": main.context,
         "context_window": window,
         "context_pct": pct,
+        "alert_context_tokens": limit,
         "compactions": main.compactions,
         "last_compaction": main.last_compaction,
         "cost_usd": cost,
@@ -1887,7 +1900,7 @@ def hook(event: dict) -> dict | None:
         _save_relaunch_state(sid, state)
         return None
     st = tail_stats(tr)
-    if st.context < CONF["relaunch_context_tokens"]:
+    if st.context < context_limit("relaunch_context_tokens", context_window(st.model, st.peak)):
         return None
     signals = new_work_signals(prompt, tr, state)
     if not signals:

@@ -41,6 +41,7 @@
 # Alerts on open sessions, each a reason to continue in a fresh one: context in tokens (the page's
 # context gauge fills up to it), compactions, and what the next message costs once the cache is cold.
 # alert_context_tokens = 300000
+# alert_context_window_pct = 75.0   # cap: a 200k window compacts at ~167k, before 300k
 # alert_compactions = 3
 # alert_cold_usd = 2.0
 
@@ -60,6 +61,7 @@
 # session is past this many tokens. Provisional. relaunch_prompt is the new session's first message
 # when "relaunch:" came with a request ({handoff} = handoff or context file, {request} = the request).
 # relaunch_context_tokens = 200000
+# relaunch_context_window_pct = 60.0   # cap: before auto-compaction and before the alert
 # relaunch_prompt = "Read {handoff} first: it is what an earlier session left for this. Then, the user's request: {request}"
 # The handoff a relaunch asks for follows this template (the handoff skill's); "" or a missing file
 # falls back to a short list of what to cover.

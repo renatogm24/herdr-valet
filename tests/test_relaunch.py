@@ -28,7 +28,7 @@ def iso(minutes_ago):
     return t.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def transcript(sid, context, minutes_ago=1, said=("arreglemos el F-014",)):
+def transcript(sid, context, minutes_ago=1, said=("arreglemos el F-014",), model="claude-opus-5-5"):
     """A session at `context` tokens whose last reply was `minutes_ago` ago, on a 5 min cache."""
     PROJ.mkdir(parents=True, exist_ok=True)
     rows = [{"type": "user", "timestamp": iso(30), "message": {"content": t}} for t in said]
@@ -36,7 +36,7 @@ def transcript(sid, context, minutes_ago=1, said=("arreglemos el F-014",)):
              "cache_creation_input_tokens": 1000,
              "cache_creation": {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 1000}}
     rows.append({"type": "assistant", "timestamp": iso(minutes_ago), "uuid": "a1",
-                 "message": {"id": "a1", "model": "claude-opus-5-5", "usage": usage, "content": "ok"}})
+                 "message": {"id": "a1", "model": model, "usage": usage, "content": "ok"}})
     p = PROJ / f"{sid}.jsonl"
     p.write_text("\n".join(json.dumps({"sessionId": sid, **r}) for r in rows) + "\n")
     return p
@@ -72,6 +72,13 @@ class Hook(unittest.TestCase):
     def test_a_small_session_is_left_alone(self):
         transcript("h1", 50_000)
         self.assertIsNone(valet.hook(event("h1", "comencemos con el F-016")))
+
+    def test_a_200k_window_stops_new_work_before_it_compacts(self):
+        # 60% of 200k: 120k, where a 1M window still waits for 200k.
+        transcript("h7", 130_000, model="claude-sonnet-4-6")
+        self.assertEqual(valet.hook(event("h7", "comencemos con el F-016"))["decision"], "block")
+        transcript("h8", 130_000)
+        self.assertIsNone(valet.hook(event("h8", "comencemos con el F-016")))
 
     def test_outside_herdr_nothing_happens(self):
         transcript("h2", 400_000)
@@ -191,3 +198,17 @@ class HandoffTemplate(unittest.TestCase):
     def test_a_short_list_without_it(self):
         self.assertIn("Short and specific", self.instructions(str(Path(TMP) / "missing.md")))
         self.assertIn("Short and specific", self.instructions(""))
+
+
+class ContextLimits(unittest.TestCase):
+    def test_capped_at_a_share_of_the_window(self):
+        self.assertEqual(valet.context_limit("alert_context_tokens", 1_000_000), 300_000)
+        self.assertEqual(valet.context_limit("alert_context_tokens", 200_000), 150_000)
+        self.assertEqual(valet.context_limit("relaunch_context_tokens", 1_000_000), 200_000)
+        self.assertEqual(valet.context_limit("relaunch_context_tokens", 200_000), 120_000)
+
+    def test_a_200k_session_alerts_and_shows_its_own_limit(self):
+        st = valet.stats(transcript("c1", 160_000, model="claude-sonnet-4-6"))
+        self.assertEqual((st["context_window"], st["alert_context_tokens"]), (200_000, 150_000))
+        self.assertIn("160k tokens of context", st["alerts"])
+        self.assertEqual(valet.stats(transcript("c2", 160_000))["alerts"][:1], [])
