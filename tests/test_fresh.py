@@ -69,6 +69,19 @@ class Cache(unittest.TestCase):
     def test_no_cache_before_a_write(self):
         self.assertIsNone(valet.stats(transcript("c3", user("hola")))["cache"])
 
+    def test_alerts_are_reasons_to_start_fresh_not_money_spent(self):
+        # 250,000 tokens, last reply days ago: past the context limit, and the cold cache costs
+        # 250k x $4 x 2 = $2.00 to write again (alert_cold_usd is 2.0).
+        p = transcript("c5", reply("2026-10-20T10:00:00Z", "a", w1h=1000), reply("2026-10-20T10:05:00Z", "b", read=248_990, w1h=1000))
+        alerts = valet.stats(p)["alerts"]
+        self.assertEqual(alerts, ["250k tokens of context", "cache cold: the next message re-sends it all (≈ $2.00)"])
+
+    def test_a_warm_cache_raises_no_cold_alert(self):
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        p = transcript("c6", reply(now, "a", read=499_990, w1h=0), reply(now, "b", read=499_990, w1h=10))
+        self.assertEqual(valet.stats(p)["alerts"], ["500k tokens of context"])
+
     def test_an_unpriced_model_has_no_cost(self):
         p = transcript("c4", reply("2026-10-20T10:00:00Z", "a", w1h=1000, model="claude-future-9"))
         c = valet.stats(p)["cache"]

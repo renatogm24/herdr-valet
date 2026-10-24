@@ -20,7 +20,9 @@ herdr-valet:
 4. **Web page** (`127.0.0.1:8790`): parked sessions with their summary and a **Resume in herdr**
    button, open sessions with **Park**, and recently resumed ones. Works from a phone.
 5. **Watches open sessions:** context in use, compactions and estimated cost (subagents
-   included), with alerts past a threshold, and a **Recap** of what each one is doing without
+   included), with an alert when one is worth continuing in a fresh session (context past
+   `alert_context_tokens`, compacted `alert_compactions` times, or a cold cache whose next message
+   costs more than `alert_cold_usd`) and a **Continue fresh** button next to it, and a **Recap** of what each one is doing without
    closing it (parking right after reuses it). It also shows the **prompt cache**: how long it
    stays warm (Claude Code keeps it 1 h on a subscription, 5 min on an API key, counted from the
    last reply, which the transcript's cache writes tell), and once it is cold, what the next

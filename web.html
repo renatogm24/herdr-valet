@@ -78,7 +78,6 @@
      what to do. One line never fits the actions next to the stats, and squeezed it overlapped. */
   .platform { display: flex; flex-direction: column; gap: 6px; }
   .open { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--line); border-radius: 8px; min-width: 0; }
-  .open.alert { border-color: color-mix(in srgb, var(--warn) 45%, var(--rule)); border-left-color: var(--line); }
   .open-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px calc(var(--u) * 1.5);
     padding: 8px 8px 8px 12px; }
   .open-row > .pf { grid-column: 1; }
@@ -87,13 +86,34 @@
   .open .foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px calc(var(--u) * 1.5); }
   /* The place gives way after the title, and both end in "…" instead of running into the state. */
   .open .place { font-weight: 700; font-size: 0.9rem; white-space: nowrap; flex: 0 1 auto; min-width: 0; max-width: 40ch; overflow: hidden; text-overflow: ellipsis; }
-  .open .place .tb { color: var(--line); }
+  .open .place .tb { color: var(--body); font-weight: 600; }
   .open .place .sep { color: var(--faint); font-weight: 400; margin: 0 2px; }
   .open .nm { color: var(--body); font-size: 0.88rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 4 auto; }
   .open .st { font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
   .open .st.working { color: var(--ok); font-weight: 600; }
   .open .acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; margin-left: auto; }
   .open .note { font-size: 0.78rem; padding: 0 12px 8px; }
+  /* An alert is a reason to continue in a fresh session: said in words, with the action next to
+     it, on a band of its own. Never a hue on the border, which the project stripe already uses. */
+  .open .alertbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px calc(var(--u) * 1.5); padding: 6px 8px 6px 12px;
+    background: var(--warn-soft); color: var(--warn); font-size: 0.8rem; font-weight: 600; border-radius: 0 0 7px 0;
+    border-top: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+  .open .alertbar .why { flex: 1 1 auto; min-width: 0; }
+  .open .alertbar .why::before { content: "⚠"; margin-right: 6px; }
+  /* Rare actions wait behind "⋯": a row shows at most one action of its own. */
+  .more { position: relative; }
+  .more > summary { list-style: none; }
+  .more > summary::-webkit-details-marker { display: none; }
+  .more[open] > summary { background: var(--raised); }
+  .more .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 230px; display: flex; flex-direction: column;
+    background: var(--panel); border: 1px solid var(--rule-strong); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+  .more .menu button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; gap: 1px;
+    padding: 6px 10px; border-radius: 5px; font-size: 0.84rem; font-weight: 600; color: var(--ink); }
+  .more .menu button small { font-size: 0.74rem; font-weight: 400; color: var(--muted); }
+  .more .menu button:hover, .more .menu button:focus-visible { background: var(--raised); }
+  .more .menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .more .menu button.armed { background: var(--warn-soft); color: var(--warn); }
+  .more .menu hr { border: 0; border-top: 1px solid var(--rule); margin: 4px 2px; }
   .open .note:empty { display: none; }
   .open .recap { border-top: 1px solid var(--rule); padding: calc(var(--u) * 1.5) 12px; }
   .open .recap .summary { border-top: 0; padding-top: 0; grid-template-columns: 140px 1fr; font-size: 0.88rem; }
@@ -105,18 +125,18 @@
     color: #fff; background: var(--pf, var(--faint)); border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex: none; }
   .pf.none { background: transparent; }
   .to-pf::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pf); margin-right: 6px; }
-  /* stats: context gauge · compactions · cost */
+  /* stats: context gauge · compactions · cost. The gauge fills up to alert_context_tokens, where
+     auto-compaction starts showing up, not to the model's window (1M would read 28% on a session
+     about to compact); the tokens are written next to it. */
   .stats { display: flex; align-items: center; gap: calc(var(--u) * 1.25); font-size: 0.78rem; color: var(--muted); white-space: nowrap; }
-  .gauge { display: inline-flex; align-items: center; gap: 6px; }
-  .gauge i { width: 54px; height: 6px; border-radius: 3px; background: var(--raised); overflow: hidden; display: block; }
+  .gauge { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+  .gauge i { width: 72px; height: 8px; border-radius: 4px; border: 1px solid var(--rule-strong); overflow: hidden; display: block; box-sizing: content-box; }
   .gauge i b { display: block; height: 100%; background: var(--ok); }
   .gauge.mid i b { background: var(--warn); } .gauge.hi i b { background: var(--bad); }
-  .gauge.hi { color: var(--bad); font-weight: 600; }
+  .gauge.mid { color: var(--warn); font-weight: 600; } .gauge.hi { color: var(--bad); font-weight: 600; }
   .stats .hot { color: var(--warn); font-weight: 600; }
   .stats .cache.cold { color: var(--muted); font-style: italic; }
-  .alerts { display: flex; flex-wrap: wrap; gap: 6px; }
-  .alerts span { font-size: 0.75rem; font-weight: 600; color: var(--warn); background: var(--warn-soft); border-radius: 999px; padding: 1px 9px; }
-  .empty-line { font-size: 0.88rem; color: var(--muted); }
+  .advice { font-size: 0.84rem; color: var(--warn); background: var(--warn-soft); border-radius: 6px; padding: 8px 12px; }
   @media (max-width: 860px) {
     .open .acts { justify-content: flex-start; margin-left: 0; }
     .open .recap .summary { grid-template-columns: 1fr; }
@@ -166,18 +186,21 @@
   .summary dt { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding-top: 3px; }
   .summary dd { color: var(--body); max-width: 68ch; overflow-wrap: anywhere; }
   .summary dd.next { color: var(--ink); font-weight: 600; }
+  /* Beside the map the detail is ~480px wide: a 150px label column would leave the summary a
+     sliver and push the card past the screen. Labels go above their text there. */
+  @media (max-width: 1100px) { .detail .summary { grid-template-columns: 1fr; gap: 4px; } .detail .summary dd { margin-bottom: calc(var(--u) * 1.5); } }
   .path { color: var(--muted); overflow-wrap: anywhere; }
-  .actions { display: flex; align-items: center; gap: var(--u); flex-wrap: wrap; border-top: 1px solid var(--rule); padding-top: calc(var(--u) * 2.5); }
-  button.btn { font: inherit; font-size: 0.88rem; font-weight: 600; border-radius: 6px; padding: 7px 14px; cursor: pointer;
+  .actions { display: flex; align-items: center; gap: var(--u); flex-wrap: wrap; }
+  .btn { font: inherit; font-size: 0.88rem; font-weight: 600; border-radius: 6px; padding: 7px 14px; cursor: pointer;
     border: 1px solid var(--rule-strong); background: var(--panel); color: var(--ink); transition: background 150ms, border-color 150ms; }
-  button.btn:hover { background: var(--raised); }
-  button.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  button.btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
-  button.btn.danger { color: var(--bad); border-color: transparent; background: transparent; }
-  button.btn.danger:hover { background: var(--bad-soft); }
-  button.btn.danger.armed { background: var(--bad); color: var(--panel); }
-  button.btn.small { padding: 4px 10px; font-size: 0.8rem; }
-  button.btn:disabled { opacity: 0.55; cursor: progress; }
+  .btn:hover { background: var(--raised); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn.primary:hover { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); }
+  .btn.danger { color: var(--bad); border-color: transparent; background: transparent; }
+  .btn.danger:hover { background: var(--bad-soft); }
+  .btn.danger.armed { background: var(--bad); color: var(--panel); }
+  .btn.small { padding: 4px 10px; font-size: 0.8rem; }
+  .btn:disabled { opacity: 0.55; cursor: progress; }
   .btn kbd { font: 600 0.68rem ui-monospace, monospace; opacity: 0.7; margin-left: 6px; }
   .note { font-size: 0.84rem; color: var(--muted); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
@@ -256,8 +279,9 @@ const narrow = matchMedia("(max-width: 860px)");
 const DETAIL = $("detail");
 
 // Line colors: a project keeps the same color everywhere, derived from its name. Mid-lightness
-// hues that hold up on both the light and the dark ground.
-const LINES = ["#e4572e", "#2a9d8f", "#e09f1f", "#4361ee", "#9b5de5", "#3f9e58", "#d1495b", "#1f8fd6", "#c06c84", "#6c8a2b"];
+// hues that hold up on both the light and the dark ground, none of them orange, amber or red:
+// those mean an alert, and a project must never look like one.
+const LINES = ["#0f9fb5", "#2a9d8f", "#7d8597", "#4361ee", "#9b5de5", "#3f9e58", "#b5179e", "#1f8fd6", "#c06c84", "#6c8a2b"];
 function lineColor(name) {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
@@ -319,12 +343,16 @@ const money = (n) => n >= 100 ? `$${Math.round(n)}` : `$${n.toFixed(2)}`;
 // subscription it is what the session would have cost, not a charge.
 function statsHtml(st) {
   if (!st) return "";
-  const lvl = st.context_pct >= 80 ? "hi" : st.context_pct >= 60 ? "mid" : "";
+  const limit = ST.alert_context_tokens;
+  const fill = Math.min(100, (100 * st.context_tokens) / limit);
+  const lvl = fill >= 100 ? "hi" : fill >= 75 ? "mid" : "";
   const lc = st.last_compaction;
   const compTitle = lc ? `Last: ${ago(lc.at)}, ${lc.trigger}, from ${ktok(lc.pre_tokens || 0)} tokens` : "Never compacted";
   const costTitle = `Estimated at list prices${st.subagents ? `, ${st.subagents} subagents included` : ""}${st.unpriced_models.length ? `; no price for ${st.unpriced_models.join(", ")}` : ""}`;
-  return `<span class="gauge ${lvl}" title="Context: ${ktok(st.context_tokens)} of ${ktok(st.context_window)} tokens"><i><b style="width:${Math.min(100, st.context_pct)}%"></b></i>${Math.round(st.context_pct)}%</span>
-    <span class="${st.compactions >= 3 ? "hot" : ""}" title="${esc(compTitle)}">${st.compactions} compact${st.compactions === 1 ? "" : "s"}</span>
+  const ctxTitle = `Context: ${ktok(st.context_tokens)} tokens. The bar fills up to ${ktok(limit)}, where auto-compaction starts happening` +
+    `${lc ? ` (this session last compacted at ${ktok(lc.pre_tokens || 0)})` : ""}; the model's window is ${ktok(st.context_window)}.`;
+  return `<span class="gauge ${lvl}" role="meter" aria-label="Context" aria-valuemin="0" aria-valuemax="${limit}" aria-valuenow="${Math.min(st.context_tokens, limit)}" title="${esc(ctxTitle)}"><i><b style="width:${fill}%"></b></i>${ktok(st.context_tokens)}</span>
+    <span title="${esc(compTitle)}">${st.compactions} compact${st.compactions === 1 ? "" : "s"}</span>
     <span title="${esc(costTitle)}">≈ ${money(st.cost_usd)}</span>${cacheHtml(st)}`;
 }
 // The prompt cache: Claude Code keeps it 1 h on a subscription, 5 min on an API key, from the
@@ -340,12 +368,20 @@ function cacheHtml(st) {
   }
   return `<span class="cache cold" title="Prompt cache (${c.ttl}) expired ${ago(c.expires_at)}: resuming writes all ${ktok(st.context_tokens)} tokens of context again${cold}. Start fresh begins without them.">cold${cold}</span>`;
 }
-const alertsHtml = (st) => st?.alerts?.length ? `<div class="alerts">${st.alerts.map((a) => `<span>${esc(a)}</span>`).join("")}</div>` : "";
+// Whether a parked session is better started fresh than resumed: its context is past the limit, or
+// resuming re-sends more than alert_cold_usd (a parked card's cache is always cold by then).
+function freshAdvice(st) {
+  if (!st) return "";
+  const why = [];
+  if (st.context_tokens >= ST.alert_context_tokens) why.push(`${ktok(st.context_tokens)} tokens of context`);
+  if (st.cache?.cold_usd != null && st.cache.cold_usd >= ST.alert_cold_usd) why.push(`resuming re-sends it all (≈ ${money(st.cache.cold_usd)})`);
+  return why.length ? `${why.join("; ")}: Start fresh picks it up from this card instead.` : "";
+}
 function summaryHtml(text) {
   const s = parseSummary(text);
   return `<dl class="summary">
     ${s["Title"] ? `<dt>Title</dt><dd>${esc(s["Title"])}</dd>` : ""}
-    ${s["Where we left off"] ? `<dt>Where we are</dt><dd>${esc(s["Where we left off"])}</dd>` : ""}
+    ${s["Where we left off"] ? `<dt>Where we left off</dt><dd>${esc(s["Where we left off"])}</dd>` : ""}
     ${s["Still pending"] ? `<dt>Still pending</dt><dd>${esc(s["Still pending"])}</dd>` : ""}
     ${s["Next step"] ? `<dt>Next step</dt><dd class="next">${esc(s["Next step"])}</dd>` : ""}
   </dl>`;
@@ -353,13 +389,14 @@ function summaryHtml(text) {
 // Two-click confirmation in place, not a browser dialog.
 function arm(btn, label, note, msg) {
   if (btn.classList.contains("armed")) return true;
-  const was = btn.textContent;
+  const was = btn.innerHTML;  // a menu item carries its hint in markup
   btn.classList.add("armed"); btn.textContent = label;
   note.className = "note"; note.textContent = msg;
-  setTimeout(() => { btn.classList.remove("armed"); btn.textContent = was; if (note.textContent === msg) note.textContent = ""; }, 5000);
+  setTimeout(() => { btn.classList.remove("armed"); btn.innerHTML = was; if (note.textContent === msg) note.textContent = ""; }, 5000);
   return false;
 }
 const shownRecaps = new Set();  // session ids whose recap is unfolded
+const openMenus = new Set();    // session ids whose "⋯" menu is open: a refresh keeps it open
 
 let ST = null;          // last /api/state
 let selected = null;    // session_id of the selected stop
@@ -384,11 +421,11 @@ function renderLive() {
   $("c-live").textContent = ST.live.length || "";
   if (ST.herdr_error) { live.innerHTML = `<p class="err">Could not read herdr: ${esc(ST.herdr_error)}</p>`; return; }
   if (!ST.live.length) { live.innerHTML = `<p class="empty-line">No Claude sessions open in herdr.</p>`; return; }
-  // Same order as herdr's sidebar: workspace, then tab. Alerts stand out by their border.
+  // Same order as herdr's sidebar: workspace, then tab. Alerts get a band of their own.
   const pos = (s) => (s.workspace_number ?? 999) * 1000 + (s.tab_number ?? 999);
   [...ST.live].sort((a, b) => pos(a) - pos(b)).forEach((s) => {
     const el = document.createElement("div");
-    el.className = "open" + (s.stats?.alerts?.length ? " alert" : "");
+    el.className = "open";
     el.style.setProperty("--line", lineColor(project(s.label)));
     const working = s.status === "working" || s.status === "blocked";
     const idle = s.idle_days == null ? "idle" : s.idle_days < 1 ? "idle today" : `idle ${Math.floor(s.idle_days)}d`;
@@ -399,6 +436,17 @@ function renderLive() {
     const tabName = rest.join("/");
     const rc = s.recap;
     const switches = working ? [] : otherProfiles(s.profile);
+    const alerts = s.stats?.alerts || [];
+    // One action of its own at most: Park while idle; the rest wait behind "⋯". An alert brings
+    // Continue fresh, on its band. A working session shows only "⋯".
+    const item = (act, label, hint, extra = "") => `<button role="menuitem" data-act="${act}" ${extra}>${label}<small>${hint}</small></button>`;
+    const menu = [
+      item("recap", rc && shownRecaps.has(s.session_id) ? "Hide recap" : "Recap", rc && !rc.stale ? "Where it stands, written earlier" : "Haiku writes where it stands, ~15 s"),
+      ...(working || alerts.length ? [] : [item("fresh", "Continue fresh", "Park it and start a new session from its card: none of this context is sent again")]),
+      item("fork", "Fork", "A copy of the conversation in a new tab, to ask something else there"),
+      ...(working ? [] : [item("restart", "Restart", "Close Claude and reopen this conversation: loads updates, MCPs and plugins")]),
+      ...switches.map((p) => item("switch", `Move to ${esc(p.label)}`, `Close it here and reopen the same conversation on ${esc(p.label)}`, `data-as="${esc(p.name)}"`)),
+    ].join("");
     el.innerHTML = `<div class="open-row">
         ${pfBadge(s.profile)}
         <div class="who-s"><span class="place" title="${esc(`${s.label}${s.tab ? ` › tab “${s.tab}”` : ""} — ${s.cwd || ""}`)}">${esc(ws)}${tabName ? `<span class="sep">›</span><span class="tb">${esc(tabName)}</span>` : ""}</span>
@@ -407,31 +455,34 @@ function renderLive() {
         <div class="foot">
         <div class="stats">${statsHtml(s.stats)}</div>
         <div class="acts">
-          ${working ? "" : `<button class="btn small" data-act="restart" title="Close Claude and reopen this same conversation in its tab: loads updates, MCP servers and plugins">Restart</button>`}
-          <button class="btn small" data-act="fork" title="Open a copy of this conversation in a new tab next to it, to ask something else there. This one stays as it is">Fork</button>
-          <button class="btn small" data-act="recap">${rc ? (shownRecaps.has(s.session_id) ? "Hide recap" : "Recap") : "Recap"}</button>
-          ${switches.map((p) => `<button class="btn small to-pf" style="--pf:${pfColor(p.name)}" data-act="switch" data-as="${esc(p.name)}" title="Close it here and reopen the same conversation on ${esc(p.label)}">Move to ${esc(p.label)}</button>`).join("")}
-          ${working ? "" : `<button class="btn small" data-act="park">Park</button>`}
+          ${working ? "" : `<button class="btn small" data-act="park" title="Haiku writes its card and the pane closes; Resume brings it back">Park</button>`}
+          <details class="more" ${openMenus.has(s.session_id) ? "open" : ""}><summary class="btn small" aria-label="More actions for ${esc(place)}" title="More actions">⋯</summary>
+            <div class="menu" role="menu">${menu}</div></details>
         </div>
         </div>
       </div>
-      ${s.stats?.alerts?.length ? `<div class="note" style="display:block">${alertsHtml(s.stats)}</div>` : ""}
+      ${alerts.length ? `<div class="alertbar"><span class="why">${alerts.map(esc).join(" · ")}</span>
+        ${working ? "" : `<button class="btn small primary" data-act="fresh" title="Park it and start a new session from its card: none of this context is sent again">Continue fresh</button>`}</div>` : ""}
       <div class="note" data-note></div>
       ${rc && shownRecaps.has(s.session_id) ? `<div class="recap">${summaryHtml(rc.summary)}
         <p class="when ${rc.stale ? "stale" : ""}">${rc.stale ? "The conversation moved on since this recap — press Recap again to refresh." : `Recap from ${ago(rc.at)}.`}</p></div>` : ""}`;
     const note = el.querySelector("[data-note]");
     const buttons = [...el.querySelectorAll("button")];
     const run = async (btn, msg, path, after) => {
+      openMenus.delete(s.session_id);
       busy = true; buttons.forEach((b) => (b.disabled = true)); note.className = "note"; note.textContent = msg;
-      try { const r = await post(path); busy = false; after(r); load(); }
+      try { const r = await post(path); await after(r); busy = false; load(); }
       catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; buttons.forEach((b) => (b.disabled = false)); }
     };
     const pane = encodeURIComponent(s.pane_id);
+    const more = el.querySelector(".more");
+    more.addEventListener("toggle", () => { more.open ? openMenus.add(s.session_id) : openMenus.delete(s.session_id); });
     for (const btn of buttons) {
       const act = btn.dataset.act;
       if (act === "recap") btn.onclick = () => {
         // A fresh recap just folds and unfolds; a missing or stale one is asked for again.
         if (rc && !rc.stale) {
+          openMenus.delete(s.session_id);
           shownRecaps.has(s.session_id) ? shownRecaps.delete(s.session_id) : shownRecaps.add(s.session_id);
           renderLive(); return;
         }
@@ -441,6 +492,17 @@ function renderLive() {
       else if (act === "fork") btn.onclick = () => run(btn, "Opening the copy in a new tab… ~10 s", `api/fork/${pane}`, () => {});
       else if (act === "park") btn.onclick = () =>
         run(btn, rc && !rc.stale ? "Closing…" : "Summarizing and closing… ~15 s", `api/park/${pane}`, (r) => { selected = r.card?.session_id || selected; });
+      else if (act === "fresh") btn.onclick = async () => {
+        if (!arm(btn, "Continue fresh? Click again", note, "Parks this session (Haiku writes its card, ~15 s) and opens a new one from that card, without the old context.")) return;
+        openMenus.delete(s.session_id);
+        // Park first: the card it writes is what the fresh session starts from.
+        run(btn, "Parking, then starting fresh… ~20 s", `api/park/${pane}`, async (r) => {
+          const sid = r.card?.session_id;
+          if (!sid) return;
+          try { await post(`api/fresh/${sid}`); note.className = "note ok"; note.textContent = "Done: the fresh session is starting in a tab of this workspace."; }
+          catch (e) { note.className = "note bad"; note.textContent = `Parked, but the fresh start failed: ${e.message}. Start fresh is on its card.`; selected = sid; }
+        });
+      };
       else if (act === "switch") btn.onclick = () => {
         const label = profileLabel(btn.dataset.as);
         if (!arm(btn, `Move to ${label}? Click again`, note, `Closes it here and reopens the same conversation on ${label}, in a tab of this workspace.`)) return;
@@ -565,6 +627,7 @@ function renderDetail() {
   }
   const s = parseSummary(c.summary);
   const p = project(c.label);
+  const advice = freshAdvice(c.stats);
   const sub = c.label.includes("/") ? c.label.split("/").slice(1).join("/") : "";
   d.style.setProperty("--line", lineColor(p));
   d.innerHTML = `
@@ -578,20 +641,20 @@ function renderDetail() {
       ${isReboot(c) ? `<span class="reboot" title="It was open when the machine rebooted">Cut off by a reboot</span>` : c.reason === "auto" ? `<span>Parked automatically</span>` : c.reason === "switch" ? `<span>Parked to switch profile</span>` : c.reason === "park-all" ? `<span>Parked with Park all</span>` : isClosed(c) ? `<span class="reboot" title="You closed its pane; this card goes away on its own">Closed by hand · goes away in ${daysLeft(c)}d</span>` : `<span>Parked by hand</span>`}
     </div>
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
-    ${alertsHtml(c.stats)}
+    ${advice ? `<p class="advice">${esc(advice)}</p>` : ""}
+    <div class="actions">
+      <button class="btn ${advice ? "" : "primary"}" data-act="resume">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}<kbd>↵</kbd></button>
+      ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
+      <button class="btn ${advice ? "primary" : ""}" data-act="fresh" title="A new Claude in the same directory and model, starting from this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">Start fresh</button>
+      <button class="btn danger" data-act="delete">Delete card</button>
+      <span class="note"></span>
+    </div>
     <dl class="summary">
       ${s["Where we left off"] ? `<dt>Where we left off</dt><dd>${esc(s["Where we left off"])}</dd>` : ""}
       ${s["Still pending"] ? `<dt>Still pending</dt><dd>${esc(s["Still pending"])}</dd>` : ""}
       ${s["Next step"] ? `<dt>Next step</dt><dd class="next">${esc(s["Next step"])}</dd>` : ""}
     </dl>
-    <div class="path mono" title="Directory">${esc(c.cwd)}</div>
-    <div class="actions">
-      <button class="btn primary" data-act="resume">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}<kbd>↵</kbd></button>
-      ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
-      <button class="btn" data-act="fresh" title="A new Claude in the same directory and model, starting from this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">Start fresh</button>
-      <button class="btn danger" data-act="delete">Delete card</button>
-      <span class="note"></span>
-    </div>`;
+    <div class="path mono" title="Directory">${esc(c.cwd)}</div>`;
   const note = d.querySelector(".note");
   const all = [...d.querySelectorAll(".actions button")];
   const del = d.querySelector('[data-act="delete"]');
@@ -687,7 +750,8 @@ async function load() {
     $("banner").innerHTML = ST.herdr_running ? "" :
       `<div class="banner" role="status">herdr is not running — did the machine reboot? Resume needs it: open the terminal, or press Resume to get a command to run by hand.</div>`;
     keepSelection();
-    renderLive();
+    // A confirmation waiting for its second click would be rebuilt unarmed: leave the rows be.
+    if (!$("live").querySelector(".armed")) renderLive();
     renderAllActions();
     renderMap();
     renderDetail();
@@ -695,6 +759,14 @@ async function load() {
     $("map").innerHTML = `<p class="map-empty err">Could not load: ${esc(e.message)}</p>`;
   }
 }
+
+document.addEventListener("click", (e) => {
+  for (const d of document.querySelectorAll("details.more[open]")) if (!d.contains(e.target)) d.open = false;
+});
+document.addEventListener("keydown", (e) => {
+  const d = e.key === "Escape" && e.target.closest?.("details.more[open]");
+  if (d) { d.open = false; d.querySelector("summary").focus(); e.stopPropagation(); }
+}, true);
 
 $("q").addEventListener("input", (e) => {
   query = e.target.value.trim().toLowerCase();

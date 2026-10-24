@@ -84,6 +84,10 @@ def state() -> dict:
     return {
         "user": USER,
         "idle_days": valet.CONF["idle_days"],
+        # What the page measures against: the context gauge fills up to the first, and a parked card
+        # suggests starting fresh past either.
+        "alert_context_tokens": valet.CONF["alert_context_tokens"],
+        "alert_cold_usd": valet.CONF["alert_cold_usd"],
         "closed_keep_days": valet.CONF["closed_keep_days"],
         "herdr_running": valet.herdr_running(),
         "parked": parked,
