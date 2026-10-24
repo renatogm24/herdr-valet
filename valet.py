@@ -94,10 +94,11 @@ DEFAULTS = {
     "context_windows": "claude-opus-5-5:1000000",
     "context_window": 200000,
     # Alerts on open sessions, each a reason to continue in a fresh one. Context in tokens: auto-compaction
-    # has fired anywhere from ~200k up, whatever the window, so a % of 1M says nothing; the page's
-    # context gauge fills up to this too. Compactions: how many before a session counts as worn.
+    # has fired anywhere from ~200k up (most often 200k-400k), whatever the window, so a % of 1M says
+    # nothing; the page's context gauge fills up to this too. At 200k most open sessions were in alert,
+    # and an alert that is always on stops being read. Compactions: how many before a session counts as worn.
     # Cold cache: what the next message costs (list prices) once the prompt cache has expired.
-    "alert_context_tokens": 200000,
+    "alert_context_tokens": 300000,
     "alert_compactions": 3,
     "alert_cold_usd": 2.0,
     # No longer read (the alerts above replaced them); kept so configs that set them still load.

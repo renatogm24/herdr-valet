@@ -70,11 +70,16 @@ class Cache(unittest.TestCase):
         self.assertIsNone(valet.stats(transcript("c3", user("hola")))["cache"])
 
     def test_alerts_are_reasons_to_start_fresh_not_money_spent(self):
-        # 250,000 tokens, last reply days ago: past the context limit, and the cold cache costs
-        # 250k x $4 x 2 = $2.00 to write again (alert_cold_usd is 2.0).
-        p = transcript("c5", reply("2026-10-20T10:00:00Z", "a", w1h=1000), reply("2026-10-20T10:05:00Z", "b", read=248_990, w1h=1000))
+        # 310,000 tokens, last reply days ago: past the context limit (300k), and the cold cache
+        # costs 310k x $4 x 2 = $2.48 to write again (alert_cold_usd is 2.0).
+        p = transcript("c5", reply("2026-10-20T10:00:00Z", "a", w1h=1000), reply("2026-10-20T10:05:00Z", "b", read=308_990, w1h=1000))
         alerts = valet.stats(p)["alerts"]
-        self.assertEqual(alerts, ["250k tokens of context", "cache cold: the next message re-sends it all (≈ $2.00)"])
+        self.assertEqual(alerts, ["310k tokens of context", "cache cold: the next message re-sends it all (≈ $2.48)"])
+
+    def test_under_the_limit_a_cold_cache_alone_alerts(self):
+        # 260,000 tokens: under 300k, but coming back cold costs $2.08.
+        p = transcript("c7", reply("2026-10-20T10:00:00Z", "a", w1h=1000), reply("2026-10-20T10:05:00Z", "b", read=258_990, w1h=1000))
+        self.assertEqual(valet.stats(p)["alerts"], ["cache cold: the next message re-sends it all (≈ $2.08)"])
 
     def test_a_warm_cache_raises_no_cold_alert(self):
         from datetime import datetime, timezone

@@ -40,7 +40,7 @@
 
 # Alerts on open sessions, each a reason to continue in a fresh one: context in tokens (the page's
 # context gauge fills up to it), compactions, and what the next message costs once the cache is cold.
-# alert_context_tokens = 200000
+# alert_context_tokens = 300000
 # alert_compactions = 3
 # alert_cold_usd = 2.0
 
