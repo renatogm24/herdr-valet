@@ -1809,7 +1809,8 @@ def handoff_instructions(session_id: str, tr: Path, pane_id: str, request: str) 
     template = Path(CONF["handoff_template"]).expanduser() if CONF["handoff_template"] else None
     if template and template.is_file():
         what = (f"Follow the sections of the handoff template at {template}, leaving out its frontmatter and "
-                "audit log (the new session reads this file once; no hook loads it). Decisions carry their why "
+                "audit log (the new session reads this file once; no hook loads it). Write it yourself, to that "
+                "path only: not with the handoff skill, which saves to another place the next step won't find. Decisions carry their why "
                 "and the options ruled out; the user's constraints go in quotes, in their words; tried-and-failed "
                 "and problems solved name the evidence; paths and URLs, never file contents. Also cover whatever "
                 "from this session the request below needs.")

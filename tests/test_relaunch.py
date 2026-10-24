@@ -186,6 +186,7 @@ class HandoffTemplate(unittest.TestCase):
         text = self.instructions(str(tpl))
         self.assertIn(f"Follow the sections of the handoff template at {tpl}", text)
         self.assertNotIn("Short and specific", text)
+        self.assertIn("not with the handoff skill", text)
 
     def test_a_short_list_without_it(self):
         self.assertIn("Short and specific", self.instructions(str(Path(TMP) / "missing.md")))
