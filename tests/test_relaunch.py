@@ -142,3 +142,52 @@ class FirstMessage(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetireHandoffs(unittest.TestCase):
+    """The handoff skill's active files for the checkout stop loading once a relaunch hands over."""
+
+    def write(self, d, name, status, branch):
+        (d / ".claude" / "handoffs").mkdir(parents=True, exist_ok=True)
+        f = d / ".claude" / "handoffs" / name
+        f.write_text(f"---\nstatus: {status}\nbranch: {branch}\nupdated: 2026-10-01T10:00\n---\n\n# H\n\n## Audit log\n- x\n")
+        return f
+
+    def test_session_directory_active_handoff_is_superseded_others_untouched(self):
+        home = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(setattr, valet, "HOME", valet.HOME)
+        valet.HOME = home
+        d = home / "2026-10-24-task"
+        (d / "sub").mkdir(parents=True)
+        (d / ".last-accessed").touch()
+        mine = self.write(d, "a.md", "active", d.name)
+        done = self.write(d, "b.md", "done", d.name)
+        other = self.write(d, "c.md", "active", "another-branch")
+        self.assertEqual(valet.retire_handoffs(str(d / "sub"), "/h/new.md"), [str(mine)])
+        text = mine.read_text()
+        self.assertIn("status: superseded", text)
+        self.assertTrue(text.rstrip().endswith("superseded by a herdr-valet relaunch, handoff /h/new.md"))
+        self.assertIn("status: done", done.read_text())
+        self.assertIn("status: active", other.read_text())
+
+    def test_outside_a_checkout_nothing_happens(self):
+        self.assertEqual(valet.retire_handoffs(tempfile.mkdtemp(), "/h/new.md"), [])
+
+
+class HandoffTemplate(unittest.TestCase):
+    def instructions(self, template):
+        self.addCleanup(valet.CONF.__setitem__, "handoff_template", valet.CONF["handoff_template"])
+        valet.CONF["handoff_template"] = template
+        return valet.handoff_instructions("t1", transcript("t1", 300_000), "w1:p1", "")
+
+    def test_the_skill_template_when_there_is_one(self):
+        tpl = Path(tempfile.mkdtemp()) / "handoff.md"
+        tpl.write_text("# Handoff: <title>\n")
+        text = self.instructions(str(tpl))
+        self.assertIn(f"Follow the sections of the handoff template at {tpl}", text)
+        self.assertNotIn("Short and specific", text)
+        self.assertIn("not with the handoff skill", text)
+
+    def test_a_short_list_without_it(self):
+        self.assertIn("Short and specific", self.instructions(str(Path(TMP) / "missing.md")))
+        self.assertIn("Short and specific", self.instructions(""))
