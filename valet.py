@@ -1096,6 +1096,9 @@ def continue_session(handoff: str, pane_id: str | None = None, keep: bool = Fals
         "model": (requested_model(tr) or last_model(tr)) if tr else "",
         "cwd": cwd,
         "handoff": str(path),
+        # The old session, so a launcher can start the new one the same way (account, MCPs).
+        "session_id": old["session_id"],
+        "profile": profile_of(old["session_id"]),
     }
     cmd = CONF["continue_command"].format(**{k: shlex.quote(v) for k, v in values.items()})
     config_dir = str(tr.parents[2]) if tr else str(DEFAULT_CONFIG_DIR)
@@ -1299,6 +1302,8 @@ def start_fresh(session_id: str) -> dict:
         "model": requested_model(tr) or c.get("model") or "",
         "cwd": c["cwd"] or str(HOME),
         "handoff": str(path),
+        "session_id": target,
+        "profile": c.get("profile") or profile_of(target),
     }
     cmd = CONF["continue_command"].format(**{k: shlex.quote(v) for k, v in values.items()})
     if c.get("config_dir"):

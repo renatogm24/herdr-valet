@@ -125,6 +125,25 @@ class Digest(unittest.TestCase):
         self.assertIn("1. hola", text)
         self.assertNotIn("## The repo now", text)
 
+    def test_continue_command_gets_the_old_sessions_id_and_profile(self):
+        transcript("d3", user("hola"), reply("2026-10-20T10:00:00Z", "a", w1h=10))
+        card = {"session_id": "d3", "label": "proj", "cwd": TMP, "model": "claude-opus-5-5",
+                "profile": "gd", "summary": "Title: Algo"}
+        valet.card_path("d3").parent.mkdir(parents=True, exist_ok=True)
+        valet.card_path("d3").write_text(json.dumps(card))
+        ran = []
+        saved = valet.CONF["continue_command"], valet.herdr_running, valet.open_in_herdr, valet.mark_resumed, valet.CONFIG_DIRS
+        valet.CONFIG_DIRS = [PROJ.parent.parent]
+        valet.CONF["continue_command"] = "launch --new --as {profile} --model {model} {session_id} {prompt}"
+        valet.herdr_running = lambda: True
+        valet.open_in_herdr = lambda c, cmd: ran.append(cmd) or "w1"
+        valet.mark_resumed = lambda *a, **k: None
+        try:
+            valet.start_fresh("d3")
+        finally:
+            valet.CONF["continue_command"], valet.herdr_running, valet.open_in_herdr, valet.mark_resumed, valet.CONFIG_DIRS = saved
+        self.assertTrue(ran[0].startswith("launch --new --as gd --model claude-opus-5-5 d3 "), ran[0])
+
 
 if __name__ == "__main__":
     unittest.main()
