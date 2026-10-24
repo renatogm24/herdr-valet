@@ -93,6 +93,7 @@ def state() -> dict:
         "closed_keep_days": valet.CONF["closed_keep_days"],
         # Without the hook, Relaunch only offers fresh: a handoff is the hook telling the session what to do.
         "relaunch_hook": valet.hook_installed(),
+        "park_handoff_tokens": valet.CONF["park_handoff_tokens"],
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),
@@ -173,7 +174,9 @@ class Handler(BaseHTTPRequestHandler):
             if action in PANE_ACTIONS:
                 if not PANE_RE.match(target):
                     raise ValueError("invalid pane")
-                if action == "park":
+                if action == "park" and parse_qs(url.query).get("handoff"):
+                    self._json(200, {"ok": True, **valet.park_handoff(target)})
+                elif action == "park":
                     self._json(200, {"ok": True, "card": valet.park(target, "manual")})
                 elif action == "recap":
                     self._json(200, {"ok": True, "recap": valet.recap(target)})

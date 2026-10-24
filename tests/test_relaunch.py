@@ -80,6 +80,13 @@ class Hook(unittest.TestCase):
         transcript("h8", 130_000)
         self.assertIsNone(valet.hook(event("h8", "comencemos con el F-016")))
 
+    def test_park_handoff_asks_for_a_handoff_and_a_park(self):
+        transcript("h9", 50_000)
+        ctx = valet.hook(event("h9", "park handoff:"))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("parking this session", ctx)
+        self.assertRegex(ctx, r"valet\.py park w1:p1 --handoff \S+/handoffs/h9-")
+        self.assertNotIn(" continue ", ctx)
+
     def test_outside_herdr_nothing_happens(self):
         transcript("h2", 400_000)
         del os.environ["HERDR_PANE_ID"]
