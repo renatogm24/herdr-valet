@@ -219,3 +219,43 @@ class ContextLimits(unittest.TestCase):
         self.assertEqual((st["context_window"], st["alert_context_tokens"]), (200_000, 150_000))
         self.assertIn("160k tokens of context", st["alerts"])
         self.assertEqual(valet.stats(transcript("c2", 160_000))["alerts"][:1], [])
+
+
+# test_actions stubs write_card on the shared module: keep the real one.
+WRITE_CARD = valet.write_card
+
+
+class SummaryFromHandoff(unittest.TestCase):
+    """A card parked with a handoff is summarized from the handoff, not from the transcript's tail
+    (the request to write it, which Haiku took as its own task)."""
+
+    def setUp(self):
+        self.calls = []
+        self._run, self._dirs = valet.subprocess.run, valet.CONFIG_DIRS
+        valet.CONFIG_DIRS = [Path(TMP) / "claude"]
+
+        def run(args, input=None, **kw):
+            self.calls.append(input)
+            return type("R", (), {"returncode": 0, "stdout": "Title: From the handoff\nNext step: x",
+                                  "stderr": ""})()
+        valet.subprocess.run = run
+
+    def tearDown(self):
+        valet.subprocess.run, valet.CONFIG_DIRS = self._run, self._dirs
+
+    def test_the_handoff_is_what_gets_summarized(self):
+        sid = "77777777-0000-0000-0000-000000000000"
+        transcript(sid, 80_000, said=("park handoff:",))
+        h = Path(TMP) / "h.md"
+        h.write_text("# Handoff: real work\n\n## Current state\n- PR #40 open\n")
+        card = WRITE_CARD(sid, "w/t", None, "manual", {"handoff": str(h)})
+        self.assertEqual(valet.title(card), "From the handoff")
+        prompt = next(c for c in self.calls if c and "<handoff>" in c)
+        self.assertIn("PR #40 open", prompt)
+        self.assertNotIn("<transcript>", prompt)
+
+    def test_without_a_handoff_the_transcript_still_is(self):
+        sid = "88888888-0000-0000-0000-000000000000"
+        transcript(sid, 80_000)
+        WRITE_CARD(sid, "w/t", None, "manual")
+        self.assertTrue(any(c and "<transcript>" in c for c in self.calls))
