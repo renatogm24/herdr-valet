@@ -17,7 +17,7 @@ the full history; the card is just the index.
     valet.py get <session_id>        one card
     valet.py resume <session_id> [--as PROFILE]   resume in herdr (in a tab of the project's
                                      workspace if one is open), optionally with another profile
-    valet.py fresh <session_id> [--print]   start a parked session over without its history, from
+    valet.py fresh <session_id> [--print] [--as PROFILE]   start a parked session over without its history, from
                                      a context file (card, compaction summary, what you asked,
                                      files written, the repo now): nothing to re-cache
     valet.py switch <pane_id> --as PROFILE   park an open session and resume it with another profile
@@ -1398,12 +1398,14 @@ def first_message(handoff: Path, request: str, default: str) -> str:
     return CONF["relaunch_prompt"].format(handoff=handoff, request=request)
 
 
-def start_fresh(session_id: str, request: str = "") -> dict:
+def start_fresh(session_id: str, request: str = "", profile: str | None = None) -> dict:
     """Start a parked session over in herdr without its history: a new Claude in the card's
     directory, with the model it ran, whose first message points at a context file written from
     the card and the transcript (see fresh_context), and carries `request` if there is one.
     Nothing of the old conversation is re-cached. The card moves to history, saying where the
-    context file is."""
+    context file is. `profile` overrides the one the session ran with."""
+    if profile:
+        check_profile(profile)
     c = json.loads(card_path(session_id).read_text())
     target = current_session(session_id)
     tr = transcript_path(target)
@@ -1421,7 +1423,7 @@ def start_fresh(session_id: str, request: str = "") -> dict:
         "cwd": c["cwd"] or str(HOME),
         "handoff": str(path),
         "session_id": target,
-        "profile": c.get("profile") or profile_of(target),
+        "profile": profile or c.get("profile") or profile_of(target),
     }
     cmd = CONF["continue_command"].format(**{k: shlex.quote(v) for k, v in values.items()})
     if c.get("config_dir"):
@@ -1430,7 +1432,7 @@ def start_fresh(session_id: str, request: str = "") -> dict:
         raise HerdrDown(f"cd {shlex.quote(values['cwd'])} && {cmd}")
     ws_id = open_in_herdr(c, cmd)
     mark_resumed(session_id, {"fresh": str(path)})
-    log(f"started {session_id} fresh in {ws_id}, context {path}")
+    log(f"started {session_id} fresh in {ws_id}, context {path}" + (f", as {profile}" if profile else ""))
     return {"workspace": ws_id, "context": str(path)}
 
 
@@ -2844,6 +2846,7 @@ def main() -> int:
     fr.add_argument("session_id")
     fr.add_argument("--print", action="store_true", help="only print the context file it would start from")
     fr.add_argument("--prompt", default="", help="what the new session should do, after reading the context file")
+    fr.add_argument("--as", dest="profile", help="start it with this profile instead of the one it ran with")
     sw = sub.add_parser("switch")
     sw.add_argument("pane_id")
     sw.add_argument("--as", dest="profile", required=True)
@@ -2945,7 +2948,7 @@ def main() -> int:
                     "model": last_model(tr), "last_activity": mtime_iso(tr)}
                 print(fresh_context({**c, "session_id": tr.stem}, tr), end="")
             else:
-                print(json.dumps(start_fresh(args.session_id, args.prompt), ensure_ascii=False))
+                print(json.dumps(start_fresh(args.session_id, args.prompt, args.profile), ensure_ascii=False))
         except HerdrDown as e:
             print(f"herdr is not running; by hand: {e}", file=sys.stderr)
             return 1

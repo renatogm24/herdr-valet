@@ -173,6 +173,31 @@ class Digest(unittest.TestCase):
             valet.CONF["continue_command"], valet.herdr_running, valet.open_in_herdr, valet.mark_resumed, valet.CONFIG_DIRS = saved
         self.assertTrue(ran[0].startswith("launch --new --as gd --model claude-opus-5-5 d3 "), ran[0])
 
+    def test_start_fresh_with_another_profile(self):
+        transcript("d6", user("hola"), reply("2026-10-20T10:00:00Z", "a", w1h=10))
+        card = {"session_id": "d6", "label": "proj", "cwd": TMP, "model": "claude-opus-5-5",
+                "profile": "gd", "summary": "Title: Algo"}
+        valet.card_path("d6").parent.mkdir(parents=True, exist_ok=True)
+        valet.card_path("d6").write_text(json.dumps(card))
+        ran = []
+        saved = (valet.CONF["continue_command"], valet.CONF["profiles"], valet.herdr_running, valet.open_in_herdr,
+                 valet.mark_resumed, valet.CONFIG_DIRS)
+        valet.CONFIG_DIRS = [PROJ.parent.parent]
+        valet.CONF["continue_command"] = "launch --new --as {profile} {session_id} {prompt}"
+        valet.CONF["profiles"] = "gd:GD,1:GD1"
+        valet.herdr_running = lambda: True
+        valet.open_in_herdr = lambda c, cmd: ran.append(cmd) or "w1"
+        valet.mark_resumed = lambda *a, **k: None
+        try:
+            valet.start_fresh("d6", profile="1")
+            with self.assertRaises(ValueError):
+                valet.start_fresh("d6", profile="nope")
+        finally:
+            (valet.CONF["continue_command"], valet.CONF["profiles"], valet.herdr_running, valet.open_in_herdr,
+             valet.mark_resumed, valet.CONFIG_DIRS) = saved
+        self.assertEqual(len(ran), 1)
+        self.assertTrue(ran[0].startswith("launch --new --as 1 d6 "), ran[0])
+
 
 if __name__ == "__main__":
     unittest.main()

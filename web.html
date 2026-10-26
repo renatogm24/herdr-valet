@@ -134,7 +134,13 @@
   .pf { display: inline-block; min-width: 44px; text-align: center; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.04em;
     color: #fff; background: var(--pf, var(--faint)); border-radius: 5px; padding: 2px 7px; white-space: nowrap; flex: none; }
   .pf.none { background: transparent; }
-  .to-pf::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--pf); margin-right: 6px; }
+  /* The card's profile selector: which one Resume and Start fresh open with. */
+  .pf-pick { display: inline-flex; border: 1px solid var(--rule); border-radius: 7px; padding: 2px; gap: 2px; }
+  .pf-pick label { cursor: pointer; }
+  .pf-pick input { position: absolute; opacity: 0; pointer-events: none; }
+  .pf-pick span { display: inline-block; font-size: 0.75rem; font-weight: 700; padding: 3px 9px; border-radius: 5px; color: var(--muted); }
+  .pf-pick input:checked + span { color: #fff; background: var(--pf); }
+  .pf-pick input:focus-visible + span { outline: 2px solid var(--pf); outline-offset: 1px; }
   /* stats: context gauge · compactions · cost. The gauge fills up to alert_context_tokens, where
      auto-compaction starts showing up, not to the model's window (1M would read 28% on a session
      about to compact); the tokens are written next to it. */
@@ -706,6 +712,8 @@ function renderMap() {
 }
 
 // ------------------------------------------------------------------ detail
+// The profile picked on a card, so the 30 s refresh does not reset it: {session_id: name}.
+const pickedPf = {};
 function renderDetail() {
   const d = DETAIL;
   d.replaceChildren();
@@ -734,6 +742,8 @@ function renderDetail() {
     : warm ? `: the cache is warm for ${Math.ceil((Date.parse(cache.expires_at) - Date.now()) / 60000)} more min, so its ${ktok(c.stats.context_tokens)} tokens are read from it (${resumeCost})`
     : `: its ${ktok(c.stats.context_tokens)} tokens are written to the cache again (${resumeCost})`;
   const freshFirst = advice || (handoff && !warm);
+  // Another profile is another account: resuming there finds none of this cache.
+  const pickable = c.profile && otherProfiles(c.profile).length;
   const sub = c.label.includes("/") ? c.label.split("/").slice(1).join("/") : "";
   d.style.setProperty("--line", lineColor(p));
   d.innerHTML = `
@@ -750,8 +760,9 @@ function renderDetail() {
     ${c.stats ? `<div class="stats">${statsHtml(c.stats)}</div>` : ""}
     ${advice ? `<p class="advice">${esc(advice)}</p>` : ""}
     <div class="actions">
-      <button class="btn ${freshFirst ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeWhy}">Resume${c.profile ? ` on ${esc(profileLabel(c.profile))}` : " in herdr"}${resumeCost ? `<span class="cost">${resumeCost}</span>` : ""}<kbd>↵</kbd></button>
-      ${otherProfiles(c.profile).map((p) => `<button class="btn to-pf" style="--pf:${pfColor(p.name)}" data-act="resume-as" data-as="${esc(p.name)}">Resume on ${esc(p.label)} instead</button>`).join("")}
+      ${pickable ? `<span class="pf-pick" role="radiogroup" aria-label="Profile for Resume and Start fresh" title="Profile Resume and Start fresh open with">${ST.profiles.map((p) =>
+        `<label style="--pf:${pfColor(p.name)}"><input type="radio" name="pf-${esc(c.session_id)}" value="${esc(p.name)}" ${p.name === (pickedPf[c.session_id] || c.profile) ? "checked" : ""}><span>${esc(p.label)}</span></label>`).join("")}</span>` : ""}
+      <button class="btn ${freshFirst ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeWhy}">Resume${c.profile ? ` on <span class="pf-name">${esc(profileLabel(c.profile))}</span>` : " in herdr"}<span class="cost">${resumeCost}</span><kbd>↵</kbd></button>
       <button class="btn ${freshFirst ? "primary" : ""}" data-act="fresh" title="Costs cents: the new session reads a short context file, not the conversation. A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">${handoff ? "Start fresh from handoff" : "Start fresh"}<span class="cost">&lt; $0.15</span></button>
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
@@ -780,14 +791,31 @@ function renderDetail() {
       if (e.command) d.querySelector(".actions").append(commandBox(e.command));
     }
   };
-  d.querySelector('[data-act="resume"]').onclick = () => resumeWith(null);
+  // The selected profile, or null for the one it ran with.
+  const picked = () => {
+    const v = d.querySelector(".pf-pick input:checked")?.value;
+    return v && v !== c.profile ? v : null;
+  };
+  const showPick = () => {
+    const as = picked();
+    const btn = d.querySelector('[data-act="resume"]');
+    btn.querySelector(".pf-name").textContent = profileLabel(as || c.profile);
+    const usd = cache ? (as ? cache.cold_usd : resumeUsd) : null;
+    btn.querySelector(".cost").textContent = usd != null ? `≈ ${money(usd)}` : "";
+    btn.title = as ? `Reopens the whole conversation on ${profileLabel(as)}: another account, so none of this cache is there${usd != null ? ` (≈ ${money(usd)})` : ""}`
+      : `Reopens the whole conversation${resumeWhy}`;
+  };
+  d.querySelectorAll(".pf-pick input").forEach((r) => (r.onchange = () => { pickedPf[c.session_id] = r.value; showPick(); }));
+  if (picked()) showPick();
+  d.querySelector('[data-act="resume"]').onclick = () => resumeWith(picked());
   d.querySelector('[data-act="fresh"]').onclick = async () => {
+    const as = picked();
     busy = true; all.forEach((b) => (b.disabled = true));
     note.className = "note"; note.textContent = "Writing the context and opening…";
     try {
-      await post(`api/fresh/${c.session_id}`);
+      await post(`api/fresh/${c.session_id}${as ? `?as=${encodeURIComponent(as)}` : ""}`);
       note.className = "note ok";
-      note.textContent = `Done: a fresh session is starting in a tab of “${p}” in herdr, from this card.`;
+      note.textContent = `Done: a fresh session is starting in a tab of “${p}” in herdr, from this card${as ? `, with ${profileLabel(as)}` : ""}.`;
       setTimeout(() => { busy = false; selected = null; load(); }, 2200);
     } catch (e) {
       busy = false;
@@ -796,7 +824,6 @@ function renderDetail() {
       if (e.command) d.querySelector(".actions").append(commandBox(e.command));
     }
   };
-  d.querySelectorAll('[data-act="resume-as"]').forEach((b) => (b.onclick = () => resumeWith(b.dataset.as)));
   // Confirmation in place, not a browser dialog.
   del.onclick = async () => {
     if (!del.classList.contains("armed")) {

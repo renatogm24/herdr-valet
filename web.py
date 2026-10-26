@@ -204,7 +204,7 @@ class Handler(BaseHTTPRequestHandler):
                 valet.log(f"deleted {target} (web)")
                 self._json(200, {"ok": True})
             elif action == "fresh":
-                self._json(200, {"ok": True, **valet.start_fresh(target)})
+                self._json(200, {"ok": True, **valet.start_fresh(target, profile=profile)})
             else:
                 ws = valet.resume_in_herdr(target, profile)
                 self._json(200, {"ok": True, "workspace": ws})

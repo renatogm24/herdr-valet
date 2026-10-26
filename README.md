@@ -142,7 +142,9 @@ doesn't, `fork` notices the copy came back as the same session and says so).
 summary should not go out through your personal one.
 
 `profile_command` prints which profile a session runs with and `profiles` lists the ones to
-offer; `resume_command` gets the chosen one as `{profile}`. Costs are estimates at Anthropic list
+offer; `resume_command` and `continue_command` get the chosen one as `{profile}`. A card has a
+selector for it that Resume and Start fresh both use (`--as` on the CLI); resuming on another
+profile finds none of its cache, so it shows the cold price. Costs are estimates at Anthropic list
 prices: through a proxy or a cloud provider the bill can differ, and on a subscription they are
 what the session would have cost.
 
