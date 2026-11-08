@@ -79,6 +79,12 @@ DEFAULTS = {
     # `-p --model ...` and feeds the excerpt on stdin. A wrapper of your own can route summaries
     # through the same account or proxy the session used: it must end in `exec claude "$@"`.
     "summary_command": "claude",
+    # A proxy that speaks the Anthropic API (a gateway with per-service keys), for every `claude -p`
+    # valet runs itself (summaries, recaps). Both empty = Claude Code's own login. The summary runs
+    # with --setting-sources "", so the apiKeyHelper and env in ~/.claude/settings.json never reach it:
+    # this is how it goes through the proxy. The key file holds the key alone (keep it chmod 600).
+    "llm_base_url": "",
+    "llm_key_file": "",
     "data_dir": str(Path(os.environ.get("XDG_DATA_HOME") or HOME / ".local/share") / "herdr-valet"),
     # One port per user, so two people on the same machine don't collide.
     "port": 8790 + max(0, os.getuid() - 1000),
@@ -572,6 +578,25 @@ def summarize_handoff(session_id: str, handoff: Path, max_chars: int = 14000) ->
                           f"(no automatic summary) {heading or 'see the handoff'}")
 
 
+def llm_env() -> dict | None:
+    """The environment for valet's own `claude -p`: through llm_base_url with the key in llm_key_file,
+    without the credentials that would win over it. None = inherit (Claude Code's own login)."""
+    if not CONF["llm_base_url"]:
+        return None
+    env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY")}
+    env["ANTHROPIC_BASE_URL"] = CONF["llm_base_url"]
+    try:
+        key = Path(CONF["llm_key_file"]).expanduser().read_text().strip() if CONF["llm_key_file"] else ""
+    except OSError as e:
+        key = ""
+        log(f"llm_key_file: {e}")
+    if key:
+        env["ANTHROPIC_AUTH_TOKEN"] = key
+    else:
+        log("llm_base_url is set but there is no key in llm_key_file: the proxy will likely refuse it")
+    return env
+
+
 def summarize_text(session_id: str, prompt: str, fallback: str) -> str:
     cmd = [a.replace("{session_id}", session_id) for a in shlex.split(CONF["summary_command"])]
     # --tools "": no tools. With them Haiku sometimes tries to read a file the transcript names,
@@ -584,7 +609,7 @@ def summarize_text(session_id: str, prompt: str, fallback: str) -> str:
     # A reply without "Title:" is not a summary (a refusal, an error): retry once.
     for attempt in (1, 2):
         try:
-            out = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=180)
+            out = subprocess.run(args, input=prompt, capture_output=True, text=True, timeout=180, env=llm_env())
         except Exception as e:  # noqa: BLE001 — park anyway without a summary
             log(f"summary failed: {e}")
             break
