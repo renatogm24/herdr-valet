@@ -82,6 +82,21 @@
 # --fork-session on to claude.
 # fork_command = "claude --resume {session_id} --fork-session --model {model}"
 
+# New session from the page (project, branch, model, first message). It needs a launcher of yours
+# that knows your projects and worktrees; with any of the three empty, the page doesn't offer it.
+# projects_command (run by valet, no terminal) prints JSON:
+#   [{"id", "label", "context", "type", "path", "cloned", "model",
+#     "worktrees": [{"path", "branch", "last_accessed", "model"}]}]
+# prepare_command (run by valet, no terminal) finds or creates the directory for {target}
+#   ("id" or "id@branch") and prints {"path", "branch", "created", "project"}; on failure, its
+#   stderr is the error the page shows.
+# launch_command runs in a new herdr tab in that directory: {path}, {model}, {prompt}, {plugins},
+#   each shell-quoted, empty when not chosen. The tab goes in the workspace that already has a pane
+#   in the same repository, or in a new one named after the project.
+# projects_command = "my-launcher projects --json"
+# prepare_command = "my-launcher prepare {target} --json"
+# launch_command = "my-launcher launch {path} --model {model} --prompt {prompt} --plugins {plugins}"
+
 # Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
 # closed_keep_days = 7
 

@@ -41,16 +41,21 @@ herdr-valet:
    opens a copy of the conversation in a new tab next to it (`--fork-session`: same history, new
    session id) to ask something else there; the original goes on untouched. Both default to the
    pane they run in, so a skill or command inside the session can call them.
-9. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
+9. **Starts new sessions (optional):** with a launcher of yours that knows your projects and
+   worktrees (`projects_command`, `prepare_command`, `launch_command`), **New session** on the page
+   picks a project, an existing worktree or a new branch, the model and an optional first message,
+   and opens Claude in a new tab of the workspace that already holds that repository. Errors from
+   the launcher (a bad branch name, a repo not cloned) come back to the page.
+10. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
    session's card in parallel and only then closes them, as one batch; `restore` reopens the
    newest batch, each session in its project's workspace, in the order they sat in herdr's
    sidebar. A reboot nobody prepared for leaves a batch too (the snapshot's), so `restore` also
    brings back what it cut off. Both are buttons on the page as well.
-10. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
+11. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
    since the last run: each conversation entry (user and assistant text, by `uuid`), cards and
    recaps. No LLM on the machine; whoever receives it summarizes. Sessions in a herdr tab named
    `knowledge-…` send everything, tool calls and results included. Secrets are masked first.
-11. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
+12. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.

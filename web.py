@@ -94,6 +94,8 @@ def state() -> dict:
         # Without the hook, Relaunch only offers fresh: a handoff is the hook telling the session what to do.
         "relaunch_hook": valet.hook_installed(),
         "park_handoff_tokens": valet.CONF["park_handoff_tokens"],
+        # New session from the page: only with a launcher configured (projects/prepare/launch_command).
+        "can_launch": valet.can_launch(),
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),
@@ -135,6 +137,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/state":
             self._json(200, state())
+        elif path == "/api/projects":
+            try:
+                self._json(200, {"projects": valet.projects()})
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
         else:
             self._json(404, {"error": "not found"})
 
@@ -142,6 +149,22 @@ class Handler(BaseHTTPRequestHandler):
         """Park every open session as one batch, or resume the newest batch."""
         try:
             r = valet.park_all() if action == "park-all" else valet.restore()
+            self._json(200, {"ok": True, **r})
+        except valet.HerdrDown as e:
+            self._json(HTTPStatus.CONFLICT, {"error": f"herdr is not running: {e}"})
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
+
+    def _new(self) -> None:
+        """A new session: project@branch, model, first message and plugins in the body (what the user
+        typed stays out of URLs and logs)."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            r = valet.new_session(str(body.get("target") or ""), str(body.get("model") or ""),
+                                  str(body.get("prompt") or ""), str(body.get("plugins") or ""))
             self._json(200, {"ok": True, **r})
         except valet.HerdrDown as e:
             self._json(HTTPStatus.CONFLICT, {"error": f"herdr is not running: {e}"})
@@ -161,6 +184,9 @@ class Handler(BaseHTTPRequestHandler):
         url = urlsplit(self.path)
         if url.path in ("/api/park-all", "/api/restore"):
             self._all(url.path.rsplit("/", 1)[1])
+            return
+        if url.path == "/api/new":
+            self._new()
             return
         m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch)/([^/]+)", url.path)
         if not m:
