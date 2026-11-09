@@ -301,7 +301,23 @@
   #pj-detail { --line: var(--rule-strong); }
   #pj-detail[hidden] { display: none; }
   #pj-detail h1 .id { font-size: 0.55em; font-weight: 500; color: var(--muted); letter-spacing: 0; vertical-align: middle; }
-  #pj-detail .newsess.flat { padding-left: 0; padding-right: 0; }
+  #pj-detail .newsess.flat { padding-left: 0; padding-right: 0; font-size: 0.86rem; }
+  #pj-detail .newsess textarea { min-height: 6.5em; }
+  .lf-where { max-height: 340px; }
+  .lf-where label.pick { padding: 7px 10px; color: var(--ink); }
+  .lf-where label.pick:has(input:checked) { background: var(--accent-soft); }
+  .lf-where .pick.add b { color: var(--accent); }
+  .lf-branch { padding: 4px 10px 8px 34px; }
+  .lf-open { font-size: 0.8rem; color: var(--body); background: var(--accent-soft); border-radius: 6px; padding: 6px 10px; }
+  .lf-more > summary { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; color: var(--muted); font-size: 0.8rem; }
+  .lf-more > summary::-webkit-details-marker { display: none; }
+  .lf-more > summary b { color: var(--body); font-weight: 600; }
+  .lf-more .lf-change { margin-left: auto; color: var(--accent); font-weight: 600; }
+  .lf-more[open] .lf-change { visibility: hidden; }
+  .lf-more > .field { margin-top: var(--u); }
+  .lf-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .lf-bar .grow { flex: 1; }
+  #ns-note:empty { display: none; }
   .pj-wt-h .sect { margin-bottom: var(--u); }
   .pj-main { display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; font-size: 0.9rem; color: var(--body); }
   .pj-rows .detail { margin: 4px calc(var(--u) * 1.5) var(--u) calc(var(--u) * 4); }
@@ -839,50 +855,99 @@ function closeNewPanel() {
   pjRenderDetail();
 }
 
+const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
+
+// The form, in the order it is used: where (the worktrees themselves, with what git says about
+// each), the first message, then model and Start. Plugins and MCPs rarely change: one line that
+// opens.
 function lfHtml(p) {
   let where;
   if (!p) {
     where = `<label class="wide">Name <small>(optional: names the dated folder)</small>
       <input name="adhoc" maxlength="60" placeholder="e.g. compare-bank-apis" spellcheck="false"></label>`;
   } else if (p.type === "direct") {
-    where = `<p class="wide preview">In its folder, on <b>${esc(p.worktrees[0]?.branch || "its branch")}</b>: no worktrees</p>`;
+    const w = p.worktrees[0], i = w && wtInfo(p, w);
+    where = `<p class="wide pj-main">In its folder, on <b>${esc(w?.branch || "its branch")}</b>
+      ${i ? `<span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>` : ""}</p>`;
   } else {
-    where = `<div class="field wide"><span>Where</span><div class="chips" role="group" aria-label="Worktree">${p.worktrees.map((w) =>
-        `<button type="button" class="chip" data-wt="${esc(w.path)}" aria-pressed="${w.path === NS.wt}" title="${esc(tilde(w.path))}">${esc(w.branch || w.path.split("/").pop())}</button>`).join("")}
-        <button type="button" class="chip add" data-wt="${NEW_WT}" aria-pressed="${NS.wt === NEW_WT}">+ New branch</button></div>
-      ${NS.wt === NEW_WT ? `<input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false">
-        <small>A new worktree; the branch is used if it exists here or on origin</small>` : ""}</div>`;
+    const row = (w) => `<label class="pick" title="${esc(tilde(w.path))}"><input type="radio" name="wt" value="${esc(w.path)}" ${w.path === NS.wt ? "checked" : ""}>
+        <b>${esc(w.branch || w.path.split("/").pop())}</b>
+        <small>${w.last_accessed ? `used ${ago(fromTs(w.last_accessed))}` : "not used yet"}</small>
+        <span class="st-chips">${wtInfo(p, w).chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span></label>`;
+    where = `<div class="field wide"><span>Where</span><div class="picks lf-where" role="radiogroup" aria-label="Worktree">
+        ${p.worktrees.map(row).join("")}
+        <label class="pick add"><input type="radio" name="wt" value="${NEW_WT}" ${NS.wt === NEW_WT ? "checked" : ""}>
+          <b>+ New branch</b><small>A new worktree; the branch is used if it exists here or on origin</small></label>
+        ${NS.wt === NEW_WT ? `<div class="lf-branch"><input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false" aria-label="New branch name"></div>` : ""}
+      </div>${lfOpenHere()}</div>`;
   }
-  // Model: the worktree's saved one, else the project's, else Opus.
-  const want = nsWorktree()?.model || p?.model || "opus";
+  // Model: the one picked here, else the worktree's saved one, else the project's, else Opus.
+  const want = PJ.launch?.model || nsWorktree()?.model || p?.model || "opus";
   const models = MODELS.some(([v]) => v === want) ? MODELS : [...MODELS, [want, want]];
   return `<form class="newsess flat" id="new-panel" aria-label="New session" autocomplete="off">
     ${where}
-    <label>Model<select name="model">${models.map(([v, l]) => `<option value="${esc(v)}" ${v === want ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
-    <label class="wide">Goal or context <small>(optional: the session's first message; empty, it waits for you)</small>
+    <label class="wide">Goal <small>(optional: the session's first message; empty, Claude waits for you)</small>
       <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing">${esc(PJ.launch?.prompt || "")}</textarea></label>
-    <div class="field wide" id="ns-plugins"></div>
-    <div class="ns-acts wide">
-      <button class="btn small primary" type="submit">Start</button>
-      ${p ? `<button class="btn small" type="button" data-ns="cancel">Cancel</button>` : ""}
-      <span class="note" id="ns-note" role="status" aria-live="polite"></span>
+    <details class="wide lf-more" ${PJ.launch?.more ? "open" : ""}><summary><span id="lf-sum"></span><span class="lf-change">Change</span></summary>
+      <div class="field" id="ns-plugins"></div></details>
+    <div class="wide lf-bar">
+      <input type="hidden" name="model" value="${esc(want)}">
+      <div class="seg" role="group" aria-label="Model">${models.map(([v, l]) =>
+        `<button type="button" data-model="${esc(v)}" aria-pressed="${v === want}">${esc(l)}</button>`).join("")}</div>
+      <span class="grow"></span>
+      ${p ? `<button class="btn" type="button" data-ns="cancel">Cancel</button>` : ""}
+      <button class="btn primary" type="submit" title="${MAC ? "⌘" : "Ctrl"}+Enter">Start<kbd>${MAC ? "⌘↵" : "Ctrl ↵"}</kbd></button>
     </div>
+    <p class="note wide" id="ns-note" role="status" aria-live="polite"></p>
   </form>`;
+}
+
+// The worktree picked already has a Claude session open: starting another there is allowed, but
+// most of the time the open one is what you want.
+function lfOpenHere() {
+  const w = nsWorktree();
+  if (!w?.open) return "";
+  const here = (ST?.live || []).filter((s) => s.cwd && (s.cwd === w.path || s.cwd.startsWith(w.path + "/")));
+  const names = here.map((s) => `“${esc(s.title || s.place || s.label)}”`).join(", ");
+  return `<p class="lf-open">${w.open === 1 ? "A session is" : `${w.open} sessions are`} already open here${names ? `: ${names}` : ""}.
+    Start opens another next to it. <a href="#" data-ns="sessions">See it in Sessions</a></p>`;
+}
+
+function lfSummary() {
+  const box = $("ns-plugins"), sum = $("lf-sum");
+  if (!box || !sum) return;
+  const on = [...box.querySelectorAll("[data-plugin]:checked")].map((c) => shortPlugin(c.dataset.plugin));
+  const mcps = [...box.querySelectorAll(".checks label.locked")]
+    .map((l) => [...l.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim()).filter(Boolean);
+  sum.innerHTML = `<b>Plugins</b> ${on.length ? esc(on.join(", ")) : "none extra"}${NS.touched ? " <small>(changed)</small>" : ""}
+    <span class="sep">·</span> <b>MCPs</b> ${mcps.length ? esc(mcps.join(", ")) : "none"}`;
 }
 
 function lfWire() {
   const form = $("new-panel");
   if (!form) return;
-  form.querySelectorAll("[data-wt]").forEach((b) => (b.onclick = () => {
+  form.querySelectorAll("input[name=wt]").forEach((r) => (r.onchange = () => {
     PJ.launch.prompt = form.elements.prompt.value;
-    NS.wt = b.dataset.wt; NS.touched = false;
+    NS.wt = r.value; NS.touched = false;
     pjRenderDetail();
-    if (NS.wt === NEW_WT) $("new-panel").elements.branch?.focus();
+    const f = $("new-panel");
+    (NS.wt === NEW_WT ? f.elements.branch : f.querySelector("input[name=wt]:checked"))?.focus();
   }));
+  form.querySelectorAll("[data-model]").forEach((b) => (b.onclick = () => {
+    PJ.launch.model = form.elements.model.value = b.dataset.model;
+    form.querySelectorAll("[data-model]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+  form.querySelector(".lf-more").ontoggle = (e) => { PJ.launch.more = e.target.open; };
   form.querySelector("[data-ns=cancel]")?.addEventListener("click", closeNewPanel);
-  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
+  form.querySelector("[data-ns=sessions]")?.addEventListener("click", (e) => { e.preventDefault(); location.hash = ""; });
+  form.onkeydown = (e) => {
+    if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); }
+    else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); form.requestSubmit(); }
+  };
   form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
   nsRenderPlugins();
+  $("ns-plugins").addEventListener("change", lfSummary);
+  lfSummary();
 }
 
 // Plugins: the ones that are not on for every session, checked as the repo declares them, then as
@@ -940,7 +1005,7 @@ function nsPluginSpec() {
 
 async function nsStart() {
   const form = $("new-panel"), f = form.elements, note = $("ns-note"), go = form.querySelector("[type=submit]");
-  const p = nsProject(), bad = (msg, el) => { note.className = "note bad"; note.textContent = msg; el?.focus(); };
+  const p = nsProject(), bad = (msg, el) => { note.className = "note wide bad"; note.textContent = msg; el?.focus(); };
   let target, creating = false, branch = "";
   if (NS.ctx === ADHOC) {
     target = `adhoc:${f.adhoc.value.trim()}`;
@@ -961,7 +1026,7 @@ async function nsStart() {
     if (!w?.branch) return bad("That worktree has no branch (detached HEAD): open it from a terminal");
     target = `${p.id}@${w.branch}`;
   }
-  busy = true; go.disabled = true; note.className = "note";
+  busy = true; go.disabled = true; note.className = "note wide";
   note.textContent = creating ? `Creating the ${NS.ctx === ADHOC ? "folder" : "worktree"}, then starting Claude…` : "Starting Claude…";
   try {
     const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: nsPluginSpec() });
@@ -1432,7 +1497,7 @@ function pjRenderDetail() {
     <h1>${esc(p.label)} <code class="id">${esc(p.id)}</code></h1>
     <div class="facts">${facts}</div>
     <div class="actions">
-      ${ST?.can_launch ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"} aria-expanded="${PJ.launch?.id === p.id}">New session</button>` : ""}
+      ${ST?.can_launch && PJ.launch?.id !== p.id ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session</button>` : ""}
       <button class="btn" type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"} title="git fetch --prune: updates merged and deleted branches">Fetch</button>
       <details class="more"><summary class="btn" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
         ${team ? `<button type="button" disabled>Team project<small>It changes by PR to the launcher's config/projects.conf</small></button>`
