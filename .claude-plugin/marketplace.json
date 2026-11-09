@@ -1,0 +1,15 @@
+{
+  "name": "herdr-valet",
+  "description": "Claude Code skills for herdr-valet: park, resume, fork, restart, hand over and find Claude Code sessions running in herdr.",
+  "owner": {"name": "renatogm24", "url": "https://github.com/renatogm24"},
+  "plugins": [
+    {
+      "name": "valet",
+      "source": "./plugin",
+      "description": "Drive herdr-valet from inside a Claude Code session: park, park-all, restore, restart, fork, continue, fresh, new and find, plus a reference skill on using valet well.",
+      "version": "1.0.0",
+      "keywords": ["herdr", "sessions", "park", "handoff", "restart", "fork", "search"],
+      "category": "productivity"
+    }
+  ]
+}

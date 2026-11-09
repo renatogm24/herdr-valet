@@ -1,0 +1,9 @@
+{
+  "name": "valet",
+  "version": "1.0.0",
+  "description": "Drive herdr-valet from inside a Claude Code session: park, park-all, restore, restart, fork, continue, fresh, new and find, plus a reference skill on using valet well.",
+  "author": {"name": "renatogm24", "url": "https://github.com/renatogm24"},
+  "repository": "https://github.com/renatogm24/herdr-valet",
+  "license": "MIT",
+  "skills": "./skills"
+}
