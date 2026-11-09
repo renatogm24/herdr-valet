@@ -92,7 +92,9 @@
 #   stderr is the error the page shows.
 # launch_command runs in a new herdr tab in that directory: {path}, {model}, {prompt}, {plugins},
 #   each shell-quoted, empty when not chosen. The tab goes in the workspace that already has a pane
-#   in the same repository, or in a new one named after the project.
+#   in the same repository, or in a new one named after the project. With {profile} in it too
+#   (and `profiles` set), New session asks which profile to start with and requires one: for a
+#   launcher per account, e.g. "my-launch {profile} {path} …".
 # projects_command = "my-launcher projects --json"
 # prepare_command = "my-launcher prepare {target} --json"
 # launch_command = "my-launcher launch {path} --model {model} --prompt {prompt} --plugins {plugins}"

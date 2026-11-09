@@ -96,6 +96,8 @@ def state() -> dict:
         "park_handoff_tokens": valet.CONF["park_handoff_tokens"],
         # New session from the page: only with a launcher configured (projects/prepare/launch_command).
         "can_launch": valet.can_launch(),
+        # launch_command takes {profile}: New session asks which profile to start with.
+        "launch_profiles": valet.launch_profiles(),
         "herdr_running": valet.herdr_running(),
         "parked": parked,
         "profiles": valet.profiles(),
@@ -172,7 +174,8 @@ class Handler(BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}") if n else {}
             r = valet.new_session(str(body.get("target") or ""), str(body.get("model") or ""),
-                                  str(body.get("prompt") or ""), str(body.get("plugins") or ""))
+                                  str(body.get("prompt") or ""), str(body.get("plugins") or ""),
+                                  str(body.get("profile") or ""))
             self._json(200, {"ok": True, **r})
         except valet.HerdrDown as e:
             self._json(HTTPStatus.CONFLICT, {"error": f"herdr is not running: {e}"})
