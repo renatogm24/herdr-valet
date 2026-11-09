@@ -134,7 +134,7 @@ command; cards and config stay.
 ## Use
 
 - Page: `http://127.0.0.1:8790` (the port is `8790 + (uid - 1000)`; on macOS, 8790).
-- CLI: `herdr-valet live`, `list`, `park <pane_id>`, `resume <session_id> [--as PROFILE]`,
+- CLI: `herdr-valet live`, `list`, `park [pane_id]`, `resume <session_id> [--as PROFILE] [--fork]`,
   `switch <pane_id> --as PROFILE`, `restart [pane_id]`, `fork [pane_id]`,
   `relaunch [pane_id] [--mode fresh|handoff] [--prompt TEXT]`, `hook`,
   `park-all [--dry-run]`, `restore`, `recap <pane_id>`, `stats <session_id>`,
@@ -145,6 +145,30 @@ command; cards and config stay.
   No LLM; transcripts are indexed once and re-read only when they change (`data_dir/search/`).
 - `herdr-valet new <id[@branch]> [--model M] [--prompt TEXT] [--plugins SPEC]` is the page's New session
   from the command line (needs the launcher commands).
+
+### From inside Claude Code: the `valet` plugin
+
+The repo is also a Claude Code plugin marketplace. Install it once per user:
+
+```bash
+claude plugin marketplace add renatogm24/herdr-valet
+claude plugin install valet@herdr-valet
+```
+
+| Command | Does |
+|---|---|
+| `/valet:park` | Park this session (card, then the pane closes) |
+| `/valet:park-all` · `/valet:restore` | Park everything before a reboot; bring the batch back after it |
+| `/valet:restart` | Close Claude and reopen the same conversation in the same tab (updates, MCPs, plugins) |
+| `/valet:fork` | A copy of this conversation in a new tab |
+| `/valet:continue` | Claude writes a handoff, a new session next to it starts on it, this one is parked |
+| `/valet:fresh` | Park this one and start a new one from valet's context file, no history (cents) |
+| `/valet:new <id>[@branch] [goal]` | A new session in a project, or `adhoc:` |
+| `/valet:find <words>` | "I worked on X a while ago, didn't I?": search, then resume, fork or start fresh |
+
+A reference skill, `herdr-valet`, loads on its own when Claude is about to use valet. It covers
+which command fits, which session it acts on, what each one costs and what the errors mean. The
+skills ship with the CLI they call, so a PR that changes a command updates its skill too.
 
 ## Configuration
 

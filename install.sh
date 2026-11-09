@@ -166,3 +166,7 @@ esac
 
 port="$("$PY" "$DIR/valet.py" config | sed -n 's/^port = //p')"
 say "✓ page: http://127.0.0.1:$port"
+if command -v claude >/dev/null; then
+  say "- Claude Code plugin (park, restart, fork, find… from inside a session):"
+  say "    claude plugin marketplace add renatogm24/herdr-valet && claude plugin install valet@herdr-valet"
+fi
