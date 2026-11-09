@@ -1163,6 +1163,52 @@ def workspace_for(path: str) -> str | None:
     return None
 
 
+def open_tab_in_repo(path: str, tab_label: str, ws_label: str, cmd: str) -> tuple[str, str]:
+    """Run cmd in a new tab at path: in the workspace that already holds that repository, or in a
+    new one named ws_label. Returns (workspace id, pane id)."""
+    ws_id = workspace_for(path)
+    if ws_id:
+        tab = herdr("tab", "create", "--workspace", ws_id, "--cwd", path, "--label", tab_label, "--no-focus")
+        pane = tab["root_pane"]["pane_id"]
+    else:
+        ws = herdr("workspace", "create", "--cwd", path, "--label", ws_label, "--no-focus")
+        ws_id = ws["workspace"]["workspace_id"]
+        first = herdr("pane", "list", "--workspace", ws_id)["panes"][0]
+        pane = first["pane_id"]
+        if first.get("tab_id"):
+            herdr("tab", "rename", first["tab_id"], tab_label)
+    herdr("pane", "run", pane, cmd)
+    return ws_id, pane
+
+
+def reopen(session_id: str, fork: bool = False) -> dict:
+    """Resume (or fork, with fork_command) a conversation that has no card: one that was resumed
+    and then closed, or one valet never parked. It goes in the workspace of its repository."""
+    if card_path(session_id).exists():
+        return fork_card(session_id) if fork else {"workspace": resume_in_herdr(session_id)}
+    target = current_session(session_id)
+    tr = transcript_path(target)
+    if not tr:
+        raise ValueError("no conversation for that session")
+    facts = transcript_index().get(target) or _transcript_facts(tr)
+    cwd = facts.get("cwd") or ""
+    if not cwd or not Path(cwd).is_dir():
+        raise ValueError(f"its directory no longer exists: {cwd or '(unknown)'}")
+    c = {"session_id": target, "cwd": cwd, "model": requested_model(tr) or last_model(tr) or ""}
+    cmd = resume_command(c, None, CONF["fork_command"] if fork else None)
+    if not herdr_running():
+        raise HerdrDown(f"cd {shlex.quote(cwd)} && {cmd}")
+    # A second copy would write to the same transcript as the one still running; a fork does not.
+    if not fork and session_owners(target):
+        raise ValueError("this session is already running: switch to it in herdr")
+    repo = Path(_repo_of(cwd))
+    ws_label = repo.parent.name if repo.name == ".git" else Path(cwd).name
+    tab_label = (facts.get("branch") or Path(cwd).name) + (" fork" if fork else "")
+    ws_id, pane = open_tab_in_repo(cwd, tab_label, ws_label, cmd)
+    log(f"{'forked' if fork else 'reopened'} {target} (no card) in {ws_id}")
+    return {"workspace": ws_id, "pane": pane}
+
+
 TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]+(@[A-Za-z0-9._/-]+)?|adhoc:[^/\n]{0,60})$")
 
 
@@ -1184,18 +1230,7 @@ def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "
     tab_label = prep.get("branch") or Path(path).name
     cmd = CONF["launch_command"].format(**{k: shlex.quote(v) for k, v in
                                            (("path", path), ("model", model), ("prompt", prompt), ("plugins", plugins))})
-    ws_id = workspace_for(path)
-    if ws_id:
-        tab = herdr("tab", "create", "--workspace", ws_id, "--cwd", path, "--label", tab_label, "--no-focus")
-        pane = tab["root_pane"]["pane_id"]
-    else:
-        ws = herdr("workspace", "create", "--cwd", path, "--label", project, "--no-focus")
-        ws_id = ws["workspace"]["workspace_id"]
-        first = herdr("pane", "list", "--workspace", ws_id)["panes"][0]
-        pane = first["pane_id"]
-        if first.get("tab_id"):
-            herdr("tab", "rename", first["tab_id"], tab_label)
-    herdr("pane", "run", pane, cmd)
+    ws_id, pane = open_tab_in_repo(path, tab_label, project, cmd)
     log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})")
     return {"workspace": ws_id, "pane": pane, "path": path, "branch": prep.get("branch"),
             "created": bool(prep.get("created"))}

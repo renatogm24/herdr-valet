@@ -776,24 +776,62 @@ function chatResult(r) {
   row.innerHTML = `<div class="chat-hit-t"><b>${esc(r.title || r.first || r.session_id)}</b></div>
     <div class="note">${esc(STATE_LABEL[r.state] || r.state)} · ${esc(r.label || "")}${r.branch ? ` [${esc(r.branch)}]` : ""}${r.at ? ` · ${esc(ago(r.at))}` : ""}</div>
     ${r.where ? `<div class="note">${esc(r.where)}</div>` : ""}`;
+  // The same actions as elsewhere on the page, right here; each one is a click, never the model's.
   const acts = document.createElement("div");
   acts.className = "ns-acts";
+  const sid = encodeURIComponent(r.session_id);
   if (r.state === "parked" || r.state === "closed") {
+    acts.append(
+      chatAct(row, "Resume", `api/resume/${sid}`, "Resumed: it is in a tab of its project in herdr.", true),
+      chatAct(row, "Fork", `api/fork-card/${sid}`, "A copy is open in a new tab; the card stays parked."));
     const b = document.createElement("button");
     b.className = "btn small"; b.type = "button"; b.textContent = "Open card";
-    b.title = "Shows its card, with Resume, Fork and Start fresh";
+    b.title = "Shows its card: summary, cost, Start fresh and more";
     b.onclick = () => showCard(r.session_id);
     acts.append(b);
-  } else if (r.state === "open") {
-    acts.innerHTML = `<span class="note">It is open in herdr: ${esc(r.label || "")}</span>`;
+  } else if (r.state === "open" && r.pane_id) {
+    const pane = encodeURIComponent(r.pane_id);
+    acts.append(
+      chatAct(row, "Restart", `api/restart/${pane}`, "Restarted in the same tab, same conversation.", false,
+        `Restart ${r.label || "this session"}? Claude closes and reopens the same conversation in its tab (loads updates, MCPs and plugins).`),
+      chatAct(row, "Fork", `api/fork/${pane}`, "A copy is open in a new tab next to it."));
+    acts.insertAdjacentHTML("beforeend", `<span class="note">Open in herdr: ${esc(r.label || "")}</span>`);
   } else if (r.cwd) {
-    acts.append(commandBox(`cd ${shq(r.cwd)} && claude --resume ${r.session_id}`));
+    acts.append(
+      chatAct(row, "Resume", `api/reopen/${sid}`, "Resumed: it is in a tab of its repository in herdr.", true),
+      chatAct(row, "Fork", `api/reopen/${sid}?fork=1`, "A copy is open in a new tab."));
   }
   row.append(acts);
+  const note = document.createElement("span");
+  note.className = "note chat-note"; note.setAttribute("role", "status");
+  row.append(note);
   return row;
 }
 
-const shq = (s) => /^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'"'"'`)}'`;
+// A button that posts one action and says how it went under the result. primary: the obvious one.
+// confirmText: ask first (Restart interrupts the session).
+function chatAct(row, label, path, done, primary = false, confirmText = "") {
+  const b = document.createElement("button");
+  b.className = `btn small${primary ? " primary" : ""}`; b.type = "button"; b.textContent = label;
+  b.onclick = async () => {
+    if (confirmText && !confirm(confirmText)) return;
+    const note = row.querySelector(".chat-note"), btns = row.querySelectorAll("button");
+    row.querySelector(".cmd")?.remove();
+    btns.forEach((x) => (x.disabled = true)); busy = true;
+    note.className = "note chat-note"; note.textContent = `${label}…`;
+    try {
+      await post(path);
+      note.className = "note ok chat-note"; note.textContent = done;
+      setTimeout(() => { busy = false; load(); }, 1500);
+    } catch (e) {
+      busy = false; btns.forEach((x) => (x.disabled = false));
+      note.className = "note bad chat-note"; note.textContent = e.message;
+      if (e.command) row.append(commandBox(e.command));
+    }
+  };
+  return b;
+}
+
 
 function showCard(id) {
   if (!ST.parked.some((c) => c.session_id === id)) { load(); return; }
