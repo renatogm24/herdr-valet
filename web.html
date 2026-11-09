@@ -253,8 +253,6 @@
   .newsess .chip.add { border-style: dashed; color: var(--muted); }
   .newsess .chip.add[aria-pressed=true] { color: var(--accent-ink); border-style: solid; }
   .newsess a.chip { text-decoration: none; }
-  .newsess #ns-proj { display: flex; flex-direction: column; gap: 6px; }
-  .newsess #ns-proj input[name=find] { max-width: 320px; }
   .newsess .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .newsess .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
   .newsess .checks input { width: auto; }
@@ -395,7 +393,6 @@
       <div class="acts" id="all-acts"></div>
       <div class="note" id="all-note"></div>
     </div>
-    <form class="newsess" id="new-panel" hidden aria-label="New session" autocomplete="off"></form>
     <div class="platform" id="live"><div class="sk" style="height:42px;width:260px"></div><div class="sk" style="height:42px;width:220px"></div></div>
   </section>
 
@@ -742,9 +739,8 @@ function renderAllActions() {
     const btn = document.createElement("button");
     btn.className = "btn small";
     btn.textContent = "New session";
-    btn.title = "Start Claude in a project: an existing worktree or a new branch, with a first message if you want";
-    btn.setAttribute("aria-expanded", String(!$("new-panel").hidden));
-    btn.onclick = () => ($("new-panel").hidden ? openNewPanel() : closeNewPanel());
+    btn.title = "Start Claude in a project (an existing worktree or a new branch) or in an ad-hoc folder: opens Projects";
+    btn.onclick = () => openNewPanel();
     acts.append(btn);
   }
   const b = ST.batch;
@@ -784,180 +780,109 @@ async function runAll(btn, msg, path, problems) {
 // Same steps as `code anku` / `code personal`: a context, then one of its projects, then one of its
 // worktrees or a new branch (prepare_command creates it). "ad-hoc" is a dated scratch directory.
 const MODELS = [["opus", "Opus"], ["opusplan", "Opus Plan"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
-const ADHOC = "ad-hoc", NEW_WT = "__new__";
+const ADHOC = "ad-hoc", NEW_WT = "__new__", ADHOC_NEW = "__adhoc__";
 let PROJECTS = [], PLUGINS = [], USER_MCPS = [];
-// What the panel has chosen: context, project id, worktree path (or NEW_WT), plugins touched, and
-// what the project finder holds.
-let NS = { ctx: "", id: "", wt: "", touched: false, find: "" };
+// What the launch form has chosen: context, project id, worktree path (or NEW_WT), plugins touched.
+let NS = { ctx: "", id: "", wt: "", touched: false };
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
 const recency = (a, b) => (b.last_accessed || 0) - (a.last_accessed || 0);
 const shortPlugin = (id) => id.split("@")[0];
 
-async function loadProjects() {
-  const r = await fetch("api/projects", { cache: "no-store" });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-  PROJECTS = data.projects || [];
-  PLUGINS = data.plugins || [];
-  USER_MCPS = data.user_mcps || [];
+// The launch form lives in the Projects view, inside the selected project's detail (or under the
+// ad-hoc tab's "New ad-hoc session"): where, model, first message, plugins. PROJECTS is that view's
+// list: the same JSON as projects_command, plus each worktree's git status.
+
+// prefill: {cwd, prompt, exact}. From a parked card ("Other branch…"): its project, a new branch, and
+// a first message that points at the card's context file. From a worktree's Session button (exact):
+// that worktree itself. Without one: the most recent project, on its most recent worktree.
+function openNewPanel(prefill = null) {
+  PJ.pending = prefill || {};
+  if (location.hash !== "#projects") location.hash = "#projects";  // showView → pjLoad → pjApplyPending
+  else if (PJ.data) pjApplyPending();
 }
 
-// Contexts in the registry's order (anku, personal, …), then ad-hoc.
-function nsContexts() {
-  const seen = [];
-  for (const p of PROJECTS) if (!seen.includes(p.context || "other")) seen.push(p.context || "other");
-  return [...seen, ADHOC];
-}
 const nsProject = () => PROJECTS.find((p) => p.id === NS.id) || null;
 const nsWorktree = () => nsProject()?.worktrees.find((w) => w.path === NS.wt) || null;
 
-function closeNewPanel() {
-  $("new-panel").hidden = true;
-  renderAllActions();
+function pjApplyPending() {
+  const pre = PJ.pending;
+  if (!pre || !PJ.data) return;
+  PJ.pending = null;
+  const ps = PJ.data.projects;
+  const at = (dir) => pre.cwd && (pre.cwd === dir || pre.cwd.startsWith(dir + "/"));
+  const p = pre.cwd ? (ps.find((x) => x.worktrees.some((w) => at(w.path))) || ps.find((x) => at(x.path))) : [...ps].sort(recency)[0];
+  if (!p) { pjRender(); return; }
+  const same = pre.exact && p.worktrees.find((w) => w.path === pre.cwd && w.path !== p.path);
+  PJ.q = ""; $("q").value = "";
+  PJ.tab = p.context;
+  pjLaunch(p, p.type === "direct" ? "" : same?.path || (pre.cwd ? NEW_WT : p.worktrees[0]?.path || NEW_WT), pre.prompt || "");
 }
 
-// prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, a new branch, and a first
-// message that points at the card's context file. With exact (from the Projects view), the worktree
-// at cwd itself instead of a new branch.
-async function openNewPanel(prefill = null) {
+// Open the form for project p (null: a new ad-hoc session) on worktree wt (a path, NEW_WT or "").
+function pjLaunch(p, wt, prompt = "") {
+  PJ.launch = { id: p ? p.id : ADHOC_NEW, prompt };
+  NS = { ctx: p ? p.context : ADHOC, id: p ? p.id : "", wt, touched: false };
+  PJ.sel = p ? p.id : ADHOC_NEW;
+  PJ.editing = null; PJ.removing = null;
+  pjRender();
   const form = $("new-panel");
-  form.hidden = false;
-  renderAllActions();
-  form.innerHTML = `<p class="note wide">Loading your projects…</p>`;
-  try {
-    await loadProjects();
-  } catch (e) {
-    form.innerHTML = `<p class="note bad wide">Could not list projects: ${esc(e.message)}</p>
-      <div class="ns-acts wide"><button class="btn small" type="button" data-ns="cancel">Close</button></div>`;
-    form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
-    return;
-  }
-  form.innerHTML = `
-    <div class="field wide"><span>Where</span><div class="chips" id="ns-ctx" role="group" aria-label="Context"></div></div>
-    <div class="field wide" id="ns-proj-f"><span>Project</span><div id="ns-proj"></div></div>
-    <div class="field wide" id="ns-where-f"><span id="ns-where-l">Worktree</span><div id="ns-where"></div></div>
-    <label>Model
-      <select name="model"></select>
-    </label>
-    <label class="wide">Goal or context <small>(optional: the session's first message; empty, it waits for you)</small>
-      <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing"></textarea>
-    </label>
-    <div class="field wide" id="ns-plugins"></div>
-    <div class="ns-acts wide">
-      <button class="btn small primary" type="submit">Start</button>
-      <button class="btn small" type="button" data-ns="cancel">Cancel</button>
-      <span class="note" id="ns-note" role="status" aria-live="polite"></span>
-    </div>`;
-  const f = form.elements;
-  form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
-  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
-  form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
+  if (!form) return;
+  (NS.wt === NEW_WT ? form.elements.branch : form.elements.adhoc || form.elements.prompt)?.focus();
+  form.scrollIntoView({ block: "nearest" });
+}
 
-  NS = { ctx: "", id: "", wt: "", touched: false, find: "" };
-  const at = (dir) => prefill?.cwd && (prefill.cwd === dir || prefill.cwd.startsWith(dir + "/"));
-  const from = prefill?.cwd && (PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path)));
-  if (from) {
-    NS.ctx = from.context || "other";
-    const same = prefill.exact && from.worktrees.find((w) => w.path === prefill.cwd && w.path !== from.path);
-    nsPickProject(from.id, from.type === "direct" ? null : (same?.path || NEW_WT));
+function closeNewPanel() {
+  if (PJ.sel === ADHOC_NEW) return;  // there the form is the whole detail
+  PJ.launch = null;
+  pjRenderDetail();
+}
+
+function lfHtml(p) {
+  let where;
+  if (!p) {
+    where = `<label class="wide">Name <small>(optional: names the dated folder)</small>
+      <input name="adhoc" maxlength="60" placeholder="e.g. compare-bank-apis" spellcheck="false"></label>`;
+  } else if (p.type === "direct") {
+    where = `<p class="wide preview">In its folder, on <b>${esc(p.worktrees[0]?.branch || "its branch")}</b>: no worktrees</p>`;
   } else {
-    const remembered = lsGet("valet-ns-ctx");
-    const newest = [...PROJECTS].sort(recency)[0];
-    nsPickContext(nsContexts().includes(remembered) ? remembered : (newest?.context || ADHOC));
-  }
-  if (prefill?.prompt) f.prompt.value = prefill.prompt;
-  (from && NS.wt === NEW_WT ? f.branch : form.querySelector("#ns-ctx [aria-pressed=true]"))?.focus();
-}
-
-function nsPickContext(ctx) {
-  NS.ctx = ctx;
-  lsSet("valet-ns-ctx", ctx);
-  const newest = PROJECTS.filter((p) => (p.context || "other") === ctx).sort(recency)[0];
-  if (ctx === ADHOC || !newest) { NS.id = ""; NS.wt = ""; nsRender(); return; }
-  nsPickProject(newest.id);
-}
-
-// wt: a worktree path, NEW_WT, or nothing for the project's most recent worktree.
-function nsPickProject(id, wt) {
-  NS.id = id;
-  const p = nsProject();
-  NS.wt = p?.type === "direct" ? (p.worktrees[0]?.path || "") : (wt ?? (p?.worktrees[0]?.path || NEW_WT));
-  NS.touched = false;
-  nsRender();
-}
-
-function nsRender() {
-  const form = $("new-panel"), f = form.elements, p = nsProject(), adhoc = NS.ctx === ADHOC;
-  $("ns-ctx").innerHTML = nsContexts().map((c) =>
-    `<button type="button" class="chip" data-ctx="${esc(c)}" aria-pressed="${c === NS.ctx}">${esc(c)}</button>`).join("");
-  $("ns-ctx").querySelectorAll("[data-ctx]").forEach((b) => (b.onclick = () => nsPickContext(b.dataset.ctx)));
-
-  // Project: the context's projects, most recent first, or what the finder matches in any context.
-  // Adding, creating and removing projects lives in the Projects view. Ad-hoc: just a name.
-  $("ns-proj-f").firstElementChild.textContent = adhoc ? "Name" : "Project";
-  if (adhoc) {
-    $("ns-proj").innerHTML = `<input name="adhoc" maxlength="60" placeholder="optional: names the dated folder, e.g. compare-bank-apis" spellcheck="false">
-      <small>A new scratch folder, no git, in the launcher's ad-hoc directory. Later it can become a project (Projects → New project)</small>`;
-  } else {
-    if (!f.find) {
-      $("ns-proj").innerHTML = `<input name="find" type="search" placeholder="Find a project in any context" aria-label="Find a project" spellcheck="false" autocomplete="off">
-        <div id="ns-proj-chips"></div>`;
-      f.find.oninput = () => { NS.find = f.find.value.trim().toLowerCase(); nsRenderProjChips(); };
-      f.find.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("ns-proj-chips").querySelector("[data-proj]")?.click(); } };
-    }
-    nsRenderProjChips();
-  }
-
-  // Worktree: the project's worktrees by branch, most recent first, or a new branch.
-  const where = $("ns-where");
-  $("ns-where-f").hidden = adhoc || !p;
-  if (p && !adhoc) {
-    $("ns-where-l").textContent = p.type === "direct" ? "Branch" : "Worktree";
-    if (!p.cloned) {
-      where.innerHTML = `<small class="bad">Not cloned yet: run <code>code</code> once in a terminal to clone it</small>`;
-    } else if (p.type === "direct") {
-      where.innerHTML = `<small>Works in its folder, on <b>${esc(p.worktrees[0]?.branch || "its branch")}</b>: no worktrees</small>`;
-    } else {
-      where.innerHTML = `<div class="chips" role="group" aria-label="Worktree">${p.worktrees.map((w) =>
-        `<button type="button" class="chip" data-wt="${esc(w.path)}" aria-pressed="${w.path === NS.wt}" title="${esc(w.path)}">${esc(w.branch || w.path.split("/").pop())}</button>`).join("")}
+    where = `<div class="field wide"><span>Where</span><div class="chips" role="group" aria-label="Worktree">${p.worktrees.map((w) =>
+        `<button type="button" class="chip" data-wt="${esc(w.path)}" aria-pressed="${w.path === NS.wt}" title="${esc(tilde(w.path))}">${esc(w.branch || w.path.split("/").pop())}</button>`).join("")}
         <button type="button" class="chip add" data-wt="${NEW_WT}" aria-pressed="${NS.wt === NEW_WT}">+ New branch</button></div>
-        ${NS.wt === NEW_WT ? `<input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false">
-          <small>New worktree; the branch is used if it exists here or on origin</small>` : ""}`;
-      where.querySelectorAll("[data-wt]").forEach((b) => (b.onclick = () => {
-        NS.wt = b.dataset.wt; NS.touched = false; nsRender();
-        if (NS.wt === NEW_WT) $("new-panel").elements.branch?.focus();
-      }));
-    }
-  } else {
-    where.innerHTML = "";
+      ${NS.wt === NEW_WT ? `<input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false">
+        <small>A new worktree; the branch is used if it exists here or on origin</small>` : ""}</div>`;
   }
-
   // Model: the worktree's saved one, else the project's, else Opus.
   const want = nsWorktree()?.model || p?.model || "opus";
   const models = MODELS.some(([v]) => v === want) ? MODELS : [...MODELS, [want, want]];
-  f.model.innerHTML = models.map(([v, l]) => `<option value="${esc(v)}" ${v === want ? "selected" : ""}>${esc(l)}</option>`).join("");
-
-  nsRenderPlugins();
+  return `<form class="newsess flat" id="new-panel" aria-label="New session" autocomplete="off">
+    ${where}
+    <label>Model<select name="model">${models.map(([v, l]) => `<option value="${esc(v)}" ${v === want ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></label>
+    <label class="wide">Goal or context <small>(optional: the session's first message; empty, it waits for you)</small>
+      <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing">${esc(PJ.launch?.prompt || "")}</textarea></label>
+    <div class="field wide" id="ns-plugins"></div>
+    <div class="ns-acts wide">
+      <button class="btn small primary" type="submit">Start</button>
+      ${p ? `<button class="btn small" type="button" data-ns="cancel">Cancel</button>` : ""}
+      <span class="note" id="ns-note" role="status" aria-live="polite"></span>
+    </div>
+  </form>`;
 }
 
-function nsRenderProjChips() {
-  const q = NS.find;
-  const ps = q ? PROJECTS.filter((x) => [x.id, x.label, x.path, x.context].join(" ").toLowerCase().includes(q)).sort(recency)
-               : PROJECTS.filter((x) => (x.context || "other") === NS.ctx).sort(recency);
-  const box = $("ns-proj-chips");
-  box.innerHTML = `<div class="chips" role="group" aria-label="Project">${ps.map((x) =>
-      `<button type="button" class="chip" data-proj="${esc(x.id)}" aria-pressed="${x.id === NS.id}" title="${esc(x.id)} · ${esc(x.path)}">${esc(x.label)}${
-        q && (x.context || "other") !== NS.ctx ? ` <small>${esc(x.context)}</small>` : ""}${x.cloned ? "" : ` <small>not cloned</small>`}</button>`).join("")
-      || `<small>No project matches “${esc(q)}”</small>`}
-    <a class="chip add" href="#projects" title="Create, clone or add projects, and clean up worktrees">Manage projects</a></div>`;
-  box.querySelectorAll("[data-proj]").forEach((b) => (b.onclick = () => {
-    const p = PROJECTS.find((x) => x.id === b.dataset.proj);
-    if (NS.find) { NS.find = ""; $("new-panel").elements.find.value = ""; }
-    if (p && (p.context || "other") !== NS.ctx) { NS.ctx = p.context || "other"; lsSet("valet-ns-ctx", NS.ctx); }
-    nsPickProject(b.dataset.proj);
+function lfWire() {
+  const form = $("new-panel");
+  if (!form) return;
+  form.querySelectorAll("[data-wt]").forEach((b) => (b.onclick = () => {
+    PJ.launch.prompt = form.elements.prompt.value;
+    NS.wt = b.dataset.wt; NS.touched = false;
+    pjRenderDetail();
+    if (NS.wt === NEW_WT) $("new-panel").elements.branch?.focus();
   }));
+  form.querySelector("[data-ns=cancel]")?.addEventListener("click", closeNewPanel);
+  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
+  form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
+  nsRenderPlugins();
 }
 
 // Plugins: the ones that are not on for every session, checked as the repo declares them, then as
@@ -1041,8 +966,8 @@ async function nsStart() {
   try {
     const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: nsPluginSpec() });
     busy = false;
-    note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? ` (new ${NS.ctx === ADHOC ? "folder" : "worktree"})` : ""}. It shows up under Open now in a few seconds.`;
-    setTimeout(() => { closeNewPanel(); load(); }, 2500);
+    note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? ` (new ${NS.ctx === ADHOC ? "folder" : "worktree"})` : ""}. It shows up in Sessions, under Open now, in a few seconds.`;
+    setTimeout(() => { if (PJ.sel !== ADHOC_NEW) PJ.launch = null; else PJ.launch.prompt = ""; pjLoad(); load(); }, 2500);
   } catch (err) {
     busy = false; go.disabled = false;
     bad(err.message);
@@ -1260,8 +1185,7 @@ function renderDetail() {
     try {
       const r = await post(`api/context/${c.session_id}`);
       note.textContent = "";
-      await openNewPanel({ cwd: r.cwd, prompt: r.prompt });
-      $("new-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
+      openNewPanel({ cwd: r.cwd, prompt: r.prompt });
     } catch (e) { note.className = "note bad"; note.textContent = e.message; }
   };
   // Confirmation in place, not a browser dialog.
@@ -1311,7 +1235,8 @@ function keepSelection() {
 // create, clone or add projects and clean up worktrees without a terminal. Team projects are
 // read-only here; they change by PR to the launcher's config/projects.conf.
 let VIEW = "sessions";
-let PJ = { data: null, err: "", loading: false, tab: "", sel: null, q: "", panel: null, clean: null, scan: null, editing: null, removing: null, adhoc: null, done: null };
+let PJ = { data: null, err: "", loading: false, tab: "", sel: null, q: "", panel: null, clean: null, scan: null, editing: null, removing: null,
+  adhoc: null, done: null, launch: null, pending: null };
 const KINDS = [["single", "A worktree per branch"], ["direct", "One folder, works on its branch"]];
 const kindOptions = (sel) => KINDS.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
 const tilde = (p) => (PJ.data?.home && p && (p === PJ.data.home || p.startsWith(PJ.data.home + "/")) ? "~" + p.slice(PJ.data.home.length) : p || "");
@@ -1328,7 +1253,7 @@ function showView() {
   q.placeholder = VIEW === "projects" ? "Search projects and branches" : "Search parked sessions";
   q.setAttribute("aria-label", q.placeholder);
   q.value = VIEW === "projects" ? PJ.q : query;
-  if (VIEW === "projects") { if (!$("new-panel").hidden) closeNewPanel(); pjLoad(); }
+  if (VIEW === "projects") pjLoad();
   else if (ST) load();
 }
 
@@ -1340,11 +1265,12 @@ async function pjLoad() {
     const d = await r.json();
     if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
     PJ.data = d; PJ.err = "";
+    PROJECTS = d.projects; PLUGINS = d.plugins || PLUGINS; USER_MCPS = d.user_mcps || USER_MCPS;
   } catch (e) {
     PJ.err = e.message;
   }
   PJ.loading = false;
-  pjRender();
+  if (PJ.pending && PJ.data) pjApplyPending(); else pjRender();
 }
 
 function pjContexts() {
@@ -1399,6 +1325,7 @@ function pjRender() {
   if (!PJ.data) return;
   $("pj-ctxs").innerHTML = pjContexts().map((c) => `<option value="${esc(c)}">`).join("");
   const all = PJ.data.projects, ctxs = pjContexts().filter((c) => all.some((p) => p.context === c));
+  if (ST?.can_launch || PJ.data.adhoc.length) ctxs.push(ADHOC);
   $("c-proj").textContent = all.length;
   if (!ctxs.includes(PJ.tab)) {
     const saved = lsGet("valet-pj-tab");
@@ -1406,16 +1333,20 @@ function pjRender() {
   }
   const words = PJ.q.split(/\s+/).filter(Boolean);
   const hit = (p) => words.every((w) => [p.id, p.label, p.path, p.context, p.owner, ...p.worktrees.map((x) => x.branch)].join(" ").toLowerCase().includes(w));
-  const shown = (words.length ? all.filter(hit) : all.filter((p) => p.context === PJ.tab)).sort(recency);
-  if (!shown.some((p) => p.id === PJ.sel)) PJ.sel = narrow.matches ? null : shown[0]?.id ?? null;
+  const adhocTab = !words.length && PJ.tab === ADHOC;
+  const shown = adhocTab ? [] : (words.length ? all.filter(hit) : all.filter((p) => p.context === PJ.tab)).sort(recency);
+  const folders = adhocTab ? PJ.data.adhoc.slice(0, 40) : [];
+  const ids = adhocTab ? [...(ST?.can_launch ? [ADHOC_NEW] : []), ...folders.map((a) => "adhoc:" + a.path)] : shown.map((p) => p.id);
+  if (!ids.includes(PJ.sel)) { PJ.sel = narrow.matches ? null : ids[0] ?? null; PJ.launch = null; }
+  if (PJ.sel === ADHOC_NEW && !PJ.launch) { PJ.launch = { id: ADHOC_NEW, prompt: "" }; NS = { ctx: ADHOC, id: "", wt: "", touched: false }; }
 
   const tabs = words.length ? `<p class="map-filter">Searching every context</p>`
     : `<div class="seg pj-tabs" role="tablist" aria-label="Context">${ctxs.map((c) => {
-        const n = all.filter((p) => p.context === c).length;
+        const n = c === ADHOC ? PJ.data.adhoc.length : all.filter((p) => p.context === c).length;
         return `<button type="button" role="tab" data-tab="${esc(c)}" aria-pressed="${c === PJ.tab}" aria-selected="${c === PJ.tab}">${esc(c)}<b>${n}</b></button>`;
       }).join("")}</div>`;
-  list.innerHTML = `${tabs}<ul class="pj-rows">${shown.map((p) => pjRow(p, words.length)).join("")}</ul>
-    ${shown.length ? "" : `<p class="map-empty">${words.length ? "No project matches." : "No projects here yet."}</p>`}`;
+  list.innerHTML = `${tabs}<ul class="pj-rows">${adhocTab ? adhocRows(folders) : shown.map((p) => pjRow(p, words.length)).join("")}</ul>
+    ${ids.length ? "" : `<p class="map-empty">${words.length ? "No project matches." : "Nothing here yet."}</p>`}`;
   list.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.tab = b.dataset.tab; lsSet("valet-pj-tab", PJ.tab); PJ.sel = null; pjRender(); }));
   list.querySelectorAll(".pj-row").forEach((b) => (b.onclick = () => pjSelect(b.dataset.id, false)));
   pjRenderDetail();
@@ -1441,9 +1372,21 @@ function pjRow(p, searching) {
     <span class="s">${bits.join(" · ")}</span></button></li>`;
 }
 
+// The ad-hoc tab: a new ad-hoc session first, then the folders, newest first.
+function adhocRows(folders) {
+  const row = (id, title, sub, color) => `<li><button type="button" class="pj-row" data-id="${esc(id)}" aria-current="${id === PJ.sel}" style="--line:${color}">
+    <span class="bullet"></span><span class="t">${title}</span><span class="c"></span><span class="s">${sub}</span></button></li>`;
+  return (ST?.can_launch ? row(ADHOC_NEW, "+ New ad-hoc session", "a dated scratch folder, no git", "var(--accent)") : "")
+    + folders.map((a) => row("adhoc:" + a.path, esc(a.name), [
+      `${a.files} file${a.files === 1 ? "" : "s"}`, a.open ? `<span class="o">${a.open} open</span>` : "",
+      a.parked ? `${a.parked} parked` : "", a.last_accessed ? short(fromTs(a.last_accessed)) : ""].filter(Boolean).join(" · "), "var(--rule-strong)")).join("");
+}
+
 function pjSelect(id, focus) {
   PJ.sel = narrow.matches && PJ.sel === id ? null : id;
   PJ.editing = null; PJ.removing = null;
+  PJ.launch = PJ.sel === ADHOC_NEW ? { id: ADHOC_NEW, prompt: "" } : null;
+  if (PJ.sel === ADHOC_NEW) NS = { ctx: ADHOC, id: "", wt: "", touched: false };
   $("pj-list").querySelectorAll(".pj-row").forEach((b) => b.setAttribute("aria-current", String(b.dataset.id === PJ.sel)));
   pjRenderDetail();
   if (focus) $("pj-list").querySelector(`.pj-row[data-id="${CSS.escape(id)}"]`)?.focus();
@@ -1451,10 +1394,12 @@ function pjSelect(id, focus) {
 
 function pjRenderDetail() {
   const list = $("pj-list"), p = PJ.data?.projects.find((x) => x.id === PJ.sel);
+  const folder = PJ.sel?.startsWith("adhoc:") && PJ.data?.adhoc.find((a) => "adhoc:" + a.path === PJ.sel);
   if (list.contains(PJD)) list.after(PJD);
-  PJD.hidden = !p;
-  if (!p) { PJD.innerHTML = ""; return; }
-  if (narrow.matches) list.querySelector(`.pj-row[data-id="${CSS.escape(p.id)}"]`)?.parentElement.append(PJD);
+  PJD.hidden = !p && !folder && PJ.sel !== ADHOC_NEW;
+  if (PJD.hidden) { PJD.innerHTML = ""; return; }
+  if (narrow.matches) list.querySelector(`.pj-row[data-id="${CSS.escape(PJ.sel)}"]`)?.parentElement.append(PJD);
+  if (!p) { adhocDetail(folder); return; }
   PJD.dataset.id = p.id;
   PJD.style.setProperty("--line", lineColor(p.id));
   const team = p.source === "team", infos = p.worktrees.map((w) => wtInfo(p, w));
@@ -1467,7 +1412,9 @@ function pjRenderDetail() {
     p.base ? `<span>base ${esc(p.base)}</span>` : "",
   ].join("");
   let body;
-  if (!p.cloned) {
+  if (PJ.launch?.id === p.id) {
+    body = lfHtml(p);
+  } else if (!p.cloned) {
     body = `<p class="empty-line">Not cloned yet: run <code>code</code> once in a terminal to clone it.</p>`;
   } else if (main) {
     const i = wtInfo(p, main);
@@ -1485,7 +1432,7 @@ function pjRenderDetail() {
     <h1>${esc(p.label)} <code class="id">${esc(p.id)}</code></h1>
     <div class="facts">${facts}</div>
     <div class="actions">
-      <button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session${p.type === "single" ? " on a branch" : ""}</button>
+      ${ST?.can_launch ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"} aria-expanded="${PJ.launch?.id === p.id}">New session</button>` : ""}
       <button class="btn" type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"} title="git fetch --prune: updates merged and deleted branches">Fetch</button>
       <details class="more"><summary class="btn" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
         ${team ? `<button type="button" disabled>Team project<small>It changes by PR to the launcher's config/projects.conf</small></button>`
@@ -1496,6 +1443,28 @@ function pjRenderDetail() {
     ${PJ.editing === p.id ? pjEditForm(p) : ""}
     <div class="pj-body">${body}</div>
     <p class="note" role="status" aria-live="polite"></p>`;
+  lfWire();
+}
+
+// The ad-hoc tab's detail: the form for a new ad-hoc session, or a folder and how to make it a project.
+function adhocDetail(a) {
+  PJD.dataset.id = "";
+  PJD.style.setProperty("--line", a ? "var(--rule-strong)" : "var(--accent)");
+  PJD.innerHTML = a ? `
+    <div class="sign"><span class="bullet"></span>ad-hoc</div>
+    <h1>${esc(a.name)}</h1>
+    <div class="facts"><span class="path">${esc(tilde(a.path))}</span><span>${a.files} file${a.files === 1 ? "" : "s"}</span>
+      ${a.last_accessed ? `<span>used ${ago(fromTs(a.last_accessed))}</span>` : ""}
+      ${a.open ? `<span><b>${a.open} open</b></span>` : ""}${a.parked ? `<span>${a.parked} parked</span>` : ""}</div>
+    <div class="actions"><button class="btn" type="button" data-pa="promote" ${a.open ? "disabled" : ""}>Make it a project…</button></div>
+    <p class="empty-line">${a.open ? "A Claude session is open here: park it first to make it a project." : "Git there, moved to ~/code/&lt;context&gt;/&lt;name&gt;; its conversations and parked cards move with it."}</p>
+    <p class="note" role="status" aria-live="polite"></p>`
+  : `<div class="sign"><span class="bullet"></span>ad-hoc</div>
+    <h1>New ad-hoc session</h1>
+    <p class="empty-line">A dated scratch folder, no git, in the launcher's ad-hoc directory. Later it can become a project.</p>
+    ${lfHtml(null)}`;
+  PJD.querySelector("[data-pa=promote]")?.addEventListener("click", () => { PJ.adhoc = a.path; pjOpenPanel("adhoc"); });
+  lfWire();
 }
 
 // A worktree: its branch, what git says, when it was last used; Session, and Remove behind ⋯.
@@ -1590,10 +1559,11 @@ function pjEditForm(p) {
   </form>`;
 }
 
-// Leaves the Projects view for a new session at cwd (exact: that worktree, not a new branch).
+// The launch form for cwd's project (exact: that worktree, not a new branch).
 function pjStartSession(cwd, exact) {
-  location.hash = "";
-  setTimeout(() => openNewPanel({ cwd, exact }), 0);
+  if (PJ.panel) { PJ.panel = null; PJ.done = null; pjRenderPanel(); }
+  PJ.pending = { cwd, exact };
+  pjApplyPending();
 }
 
 async function pjFetch(ids, btn) {
@@ -1619,7 +1589,7 @@ PJD.addEventListener("click", async (e) => {
   const fail = (err) => { note.className = "note bad"; note.textContent = err.message; b.disabled = false; };
   b.closest("details.more")?.removeAttribute("open");
   switch (b.dataset.pa) {
-    case "session": return pjStartSession(p.path, false);
+    case "session": return PJ.launch?.id === p.id ? closeNewPanel() : pjStartSession(p.path, false);
     case "wt-session": return pjStartSession(w.path, true);
     case "fetch": return pjFetch([p.id], b);
     case "clean": return pjOpenClean(p.id);

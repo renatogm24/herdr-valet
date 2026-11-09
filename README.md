@@ -42,13 +42,12 @@ herdr-valet:
    session id) to ask something else there; the original goes on untouched. Both default to the
    pane they run in, so a skill or command inside the session can call them.
 9. **Starts new sessions (optional):** with a launcher of yours that knows your projects and
-   worktrees (`projects_command`, `prepare_command`, `launch_command`), **New session** on the page
-   picks a context, one of its projects, an existing worktree or a new branch (or an ad-hoc scratch
-   folder), the model (Opus unless the folder remembers another), an optional first message and the
+   worktrees (`projects_command`, `prepare_command`, `launch_command`), **New session** (in the
+   Projects view, inside the chosen project, or under its ad-hoc tab) picks an existing worktree or
+   a new branch (or an ad-hoc scratch folder), the model (Opus unless the folder remembers another), an optional first message and the
    plugins for that folder (checked as the repo declares them; the repo's MCPs are shown, not
    chosen), and opens Claude in a new tab of the workspace that already holds that repository.
-   Errors from the launcher (a bad branch name, a repo not cloned) come back to the page. A finder
-   looks for a project in any context.
+   Errors from the launcher (a bad branch name, a repo not cloned) come back to the page.
 10. **Manages your projects (optional):** with `project_command` set, the **Projects** view lists
    every project with each worktree's git status. The status covers:
    - Uncommitted files, unpushed commits and commits ahead of the default branch.
