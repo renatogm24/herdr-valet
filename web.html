@@ -727,13 +727,12 @@ function openChat() {
     <div class="ns-acts wide">
       <button class="btn small primary" type="submit">Ask</button>
       <button class="btn small" type="button" data-chat="close">Close</button>
-      ${CHAT.length ? `<button class="btn small" type="button" data-chat="clear">Clear</button>` : ""}
+      <button class="btn small" type="button" data-chat="clear" title="Forget this conversation and start a new one" hidden>New conversation</button>
       <span class="note" id="chat-note" role="status"></span>
     </div>`;
   const f = form.elements;
   form.querySelector("[data-chat=close]").onclick = closeChat;
-  const clear = form.querySelector("[data-chat=clear]");
-  if (clear) clear.onclick = () => { CHAT = []; openChat(); };
+  form.querySelector("[data-chat=clear]").onclick = () => { CHAT = []; renderChat(); f.q.focus(); };
   form.onkeydown = (e) => {
     if (e.key === "Escape") { e.preventDefault(); closeChat(); }
     if (e.key === "Enter" && !e.shiftKey && e.target === f.q) { e.preventDefault(); form.requestSubmit(); }
@@ -746,6 +745,8 @@ function openChat() {
 function renderChat() {
   const log = $("chat-log");
   if (!log) return;
+  const clear = $("chat-panel").querySelector("[data-chat=clear]");
+  if (clear) clear.hidden = !CHAT.length || CHAT.some((t) => t.pending);
   log.innerHTML = CHAT.length ? "" : `<p class="note">Ask about your sessions, open or past: what you worked on, where it was left, in which project. Answers come from your cards and transcripts; actions are always your click.</p>`;
   CHAT.forEach((t, i) => {
     const turn = document.createElement("div");
