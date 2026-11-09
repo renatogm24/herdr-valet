@@ -121,6 +121,17 @@ DEFAULTS = {
     # original is left as it is). Same placeholders as resume_command; {model} is the one the
     # session requested. A launcher of yours must pass --fork-session on to claude.
     "fork_command": "claude --resume {session_id} --fork-session --model {model}",
+    # New session from the page (project, branch, model, first message), through a launcher of yours
+    # that knows your projects and worktrees. All three set = the page offers it; any empty = off.
+    # projects_command prints JSON: [{"id", "label", "context", "type", "path", "worktrees":
+    #   [{"path", "branch", "last_accessed", "model"}], "model"}]. Run by valet, not in a pane.
+    # prepare_command finds or creates the directory for {target} ("id" or "id@branch") and prints
+    #   {"path", "branch", "created", "project"}; its stderr is the error the page shows. Run by valet.
+    # launch_command starts Claude in a new herdr tab in that directory: {path}, {model}, {prompt},
+    #   {plugins} (each already shell-quoted; empty when not chosen).
+    "projects_command": "",
+    "prepare_command": "",
+    "launch_command": "",
     # Its first message. {handoff} is the handoff file's absolute path.
     "continue_prompt": "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off.",
     # `fresh`: a parked session started over without its history (none of it to re-cache), from a
@@ -941,6 +952,96 @@ def switch(pane_id: str, profile: str) -> str:
             break
         time.sleep(0.5)
     return resume_in_herdr(sid, profile)
+
+
+# --------------------------------------------------------------------------- new session
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def can_launch() -> bool:
+    return all(CONF[k] for k in ("projects_command", "prepare_command", "launch_command"))
+
+
+def _run_launcher(cmd: str, timeout: int) -> str:
+    """Run one of the launcher commands (projects, prepare) in a shell, without a terminal. Its
+    stdout is the answer; when it fails, the last lines of its stderr are the error."""
+    if not cmd:
+        raise ValueError("new sessions are off: set projects_command, prepare_command and launch_command")
+    try:
+        out = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=timeout,
+                             stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"the launcher took more than {timeout} s") from None
+    if out.returncode != 0:
+        lines = [ln.strip() for ln in ANSI_RE.sub("", out.stderr).splitlines() if ln.strip()]
+        raise ValueError("; ".join(lines[-3:]) or f"the launcher failed (exit {out.returncode})")
+    return out.stdout
+
+
+def projects() -> list[dict]:
+    """Your projects and their worktrees, from projects_command."""
+    data = json.loads(_run_launcher(CONF["projects_command"], 30) or "[]")
+    if not isinstance(data, list):
+        raise ValueError("projects_command did not print a list")
+    return data
+
+
+def _repo_of(path: str) -> str:
+    """The repository a directory belongs to (shared by all its worktrees), or the directory."""
+    common = _git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    return str(Path(common).resolve()) if common else str(Path(path).resolve())
+
+
+def workspace_for(path: str) -> str | None:
+    """An open workspace with a pane in the same repository (any of its worktrees), so a project's
+    sessions stay together. herdr's workspace names are the user's, not project ids."""
+    repo, seen = _repo_of(path), {}
+    for ws in herdr("workspace", "list")["workspaces"]:
+        for p in herdr("pane", "list", "--workspace", ws["workspace_id"])["panes"]:
+            cwd = p.get("cwd")
+            if cwd and cwd not in seen:
+                seen[cwd] = _repo_of(cwd) if Path(cwd).is_dir() else None
+            if cwd and seen[cwd] == repo:
+                return ws["workspace_id"]
+    return None
+
+
+TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+(@[A-Za-z0-9._/-]+)?$")
+
+
+def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "") -> dict:
+    """A new Claude session from the page: prepare_command finds or creates the directory (a branch's
+    worktree), then a new herdr tab there runs launch_command. The tab goes in the workspace that
+    already holds that repository, or in a new one named after the project."""
+    if not TARGET_RE.match(target or ""):
+        raise ValueError("pick a project (and a branch, if it uses worktrees)")
+    if not can_launch():
+        raise ValueError("new sessions are off: set projects_command, prepare_command and launch_command")
+    if not herdr_running():
+        raise HerdrDown("start herdr first")
+    prep = json.loads(_run_launcher(CONF["prepare_command"].format(target=shlex.quote(target)), 120))
+    path = prep.get("path") or ""
+    if not Path(path).is_dir():
+        raise ValueError(f"the launcher gave no directory for {target}")
+    project = prep.get("project") or target.split("@")[0]
+    tab_label = prep.get("branch") or Path(path).name
+    cmd = CONF["launch_command"].format(**{k: shlex.quote(v) for k, v in
+                                           (("path", path), ("model", model), ("prompt", prompt), ("plugins", plugins))})
+    ws_id = workspace_for(path)
+    if ws_id:
+        tab = herdr("tab", "create", "--workspace", ws_id, "--cwd", path, "--label", tab_label, "--no-focus")
+        pane = tab["root_pane"]["pane_id"]
+    else:
+        ws = herdr("workspace", "create", "--cwd", path, "--label", project, "--no-focus")
+        ws_id = ws["workspace"]["workspace_id"]
+        first = herdr("pane", "list", "--workspace", ws_id)["panes"][0]
+        pane = first["pane_id"]
+        if first.get("tab_id"):
+            herdr("tab", "rename", first["tab_id"], tab_label)
+    herdr("pane", "run", pane, cmd)
+    log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})")
+    return {"workspace": ws_id, "pane": pane, "path": path, "branch": prep.get("branch"),
+            "created": bool(prep.get("created"))}
 
 
 # --------------------------------------------------------------------------- restart, fork, park-all

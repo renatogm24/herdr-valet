@@ -226,6 +226,22 @@
   .btn:disabled { opacity: 0.55; cursor: progress; }
   .btn kbd { font: 600 0.68rem ui-monospace, monospace; opacity: 0.7; margin-left: 6px; }
   .note { font-size: 0.84rem; color: var(--muted); }
+  /* New session: project, branch, model, first message; same family as the Relaunch panel. */
+  .newsess { border: 1px solid var(--rule-strong); border-radius: 8px; background: var(--panel); padding: calc(var(--u) * 1.5);
+    margin: 0 0 calc(var(--u) * 2); display: grid; gap: var(--u); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); font-size: 0.84rem; }
+  .newsess[hidden] { display: none; }
+  .newsess label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); min-width: 0; }
+  .newsess .wide { grid-column: 1 / -1; }
+  .newsess select, .newsess input, .newsess textarea { font: inherit; color: var(--ink); background: var(--panel);
+    border: 1px solid var(--rule-strong); border-radius: 6px; padding: 6px 10px; width: 100%; box-sizing: border-box; min-width: 0; }
+  .newsess textarea { min-height: 4.5em; resize: vertical; }
+  .newsess input:disabled { color: var(--muted); background: var(--raised); }
+  .newsess small { color: var(--muted); font-size: 0.76rem; }
+  .newsess details summary { cursor: pointer; color: var(--muted); }
+  .newsess details label { margin-top: 6px; }
+  .newsess .ns-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .newsess .ns-acts .note { margin-left: 4px; }
+  .newsess .note.bad { color: var(--bad); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
   .cmd { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; flex-basis: 100%; }
   .cmd code { background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; user-select: all; overflow-wrap: anywhere; }
@@ -280,6 +296,7 @@
       <div class="acts" id="all-acts"></div>
       <div class="note" id="all-note"></div>
     </div>
+    <form class="newsess" id="new-panel" hidden aria-label="New session" autocomplete="off"></form>
     <div class="platform" id="live"><div class="sk" style="height:42px;width:260px"></div><div class="sk" style="height:42px;width:220px"></div></div>
   </section>
 
@@ -605,6 +622,15 @@ function relaunchHtml(s) {
 function renderAllActions() {
   const acts = $("all-acts"), note = $("all-note");
   acts.replaceChildren();
+  if (ST.can_launch && ST.herdr_running) {
+    const btn = document.createElement("button");
+    btn.className = "btn small";
+    btn.textContent = "New session";
+    btn.title = "Start Claude in a project: an existing worktree or a new branch, with a first message if you want";
+    btn.setAttribute("aria-expanded", String(!$("new-panel").hidden));
+    btn.onclick = () => ($("new-panel").hidden ? openNewPanel() : closeNewPanel());
+    acts.append(btn);
+  }
   const b = ST.batch;
   if (b && ST.herdr_running) {
     const btn = document.createElement("button");
@@ -635,6 +661,113 @@ async function runAll(btn, msg, path, problems) {
   busy = true; buttons.forEach((b) => (b.disabled = true)); note.className = "note"; note.textContent = msg;
   try { const r = await post(path); busy = false; const p = problems(r); note.className = p ? "note bad" : "note"; note.textContent = p; load(); }
   catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; buttons.forEach((b) => (b.disabled = false)); }
+}
+
+// ------------------------------------------------------------------ new session
+// The launcher (projects_command) knows the projects and their worktrees; valet only shows them.
+// A branch of a project with worktrees opens that worktree, or creates it (prepare_command).
+const MODELS = [["opusplan", "Opus Plan"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"], ["", "Claude's default"]];
+let PROJECTS = [];
+
+function closeNewPanel() {
+  $("new-panel").hidden = true;
+  renderAllActions();
+}
+
+async function openNewPanel() {
+  const form = $("new-panel");
+  form.hidden = false;
+  renderAllActions();
+  form.innerHTML = `<p class="note wide">Loading your projects…</p>`;
+  try {
+    const r = await fetch("api/projects", { cache: "no-store" });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    PROJECTS = data.projects;
+  } catch (e) {
+    form.innerHTML = `<p class="note bad wide">Could not list projects: ${esc(e.message)}</p>
+      <div class="ns-acts wide"><button class="btn small" type="button" data-ns="cancel">Close</button></div>`;
+    form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
+    return;
+  }
+  // Grouped by context, the most recently used first (in the groups and inside them).
+  const groups = new Map();
+  for (const p of [...PROJECTS].sort((a, b) => (b.last_accessed || 0) - (a.last_accessed || 0))) {
+    const g = p.context || "other";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(p);
+  }
+  form.innerHTML = `
+    <label>Project
+      <select name="project" required>
+        <option value="">Choose a project…</option>
+        ${[...groups].map(([g, ps]) => `<optgroup label="${esc(g)}">${ps.map((p) =>
+          `<option value="${esc(p.id)}">${esc(p.label)} · ${esc(p.id)}</option>`).join("")}</optgroup>`).join("")}
+      </select>
+    </label>
+    <label>Branch
+      <input name="branch" list="ns-branches" placeholder="existing or new" spellcheck="false">
+      <small id="ns-bhint"></small>
+    </label>
+    <datalist id="ns-branches"></datalist>
+    <label>Model
+      <select name="model">${MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
+    </label>
+    <label class="wide">Goal or context <small>(optional: the session's first message; empty, it waits for you)</small>
+      <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing"></textarea>
+    </label>
+    <details class="wide"><summary>Plugins for this session</summary>
+      <label><input name="plugins" placeholder="+meta-ads,-confluence  or  none" spellcheck="false">
+        <small>Empty: what the repo declares. It is remembered for this directory.</small></label>
+    </details>
+    <div class="ns-acts wide">
+      <button class="btn small primary" type="submit">Start</button>
+      <button class="btn small" type="button" data-ns="cancel">Cancel</button>
+      <span class="note" id="ns-note" role="status" aria-live="polite"></span>
+    </div>`;
+  const f = form.elements;
+  const proj = () => PROJECTS.find((p) => p.id === f.project.value);
+  const hint = () => {
+    const p = proj(), b = f.branch.value.trim(), h = $("ns-bhint");
+    if (!p) { h.textContent = ""; return; }
+    if (p.type === "direct") { h.textContent = "Works on its default branch, no worktrees"; return; }
+    if (!p.cloned) { h.textContent = "Not cloned yet: run the launcher once in a terminal"; return; }
+    const wt = p.worktrees.find((w) => w.branch === b);
+    h.textContent = !b ? (p.worktrees[0] ? `Empty: its most recent worktree (${p.worktrees[0].branch})` : "No worktrees yet: type a branch")
+      : wt ? `Opens the worktree at ${wt.path.split("/").pop()}`
+      : "New worktree (the branch is used if it exists here or on origin)";
+  };
+  f.project.onchange = () => {
+    const p = proj();
+    $("ns-branches").innerHTML = (p?.worktrees || []).filter((w) => w.branch).map((w) => `<option value="${esc(w.branch)}">`).join("");
+    const direct = p?.type === "direct";
+    f.branch.disabled = direct;
+    f.branch.value = direct ? (p.worktrees[0]?.branch || "") : "";
+    f.model.value = p?.model && MODELS.some(([v]) => v === p.model) ? p.model : "";
+    hint();
+  };
+  f.branch.oninput = hint;
+  form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
+  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const p = proj(), note = $("ns-note"), go = form.querySelector("[type=submit]");
+    if (!p) { note.className = "note bad"; note.textContent = "Choose a project"; f.project.focus(); return; }
+    const b = f.branch.value.trim();
+    const target = p.type !== "direct" && b ? `${p.id}@${b}` : p.id;
+    busy = true; go.disabled = true; note.className = "note";
+    note.textContent = b && !p.worktrees.some((w) => w.branch === b) ? "Creating the worktree, then starting Claude…" : "Starting Claude…";
+    try {
+      const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: f.plugins.value.trim() });
+      busy = false;
+      note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? " (new worktree)" : ""}. It shows up under Open now in a few seconds.`;
+      setTimeout(() => { closeNewPanel(); load(); }, 2500);
+    } catch (err) {
+      busy = false; go.disabled = false;
+      note.className = "note bad"; note.textContent = err.message;
+    }
+  };
+  f.project.focus();
 }
 
 // ------------------------------------------------------------------ the line map
