@@ -63,6 +63,13 @@ herdr-valet:
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
+13. **Answers questions about your sessions (optional):** **Ask** on the page ("I worked on the bank
+   login a while ago, didn't I?", "open a new session in exp-track to fix the timezone"). The
+   model has no tools: it turns the question into searches, valet runs `search`, and the model
+   answers only from what was found. Its suggestions are buttons you press (the card, or the New
+   session panel prefilled). It only shows through Cloudflare Access: valet verifies the
+   `Cf-Access-Jwt-Assertion` itself (`chat_access_team`, `chat_access_aud`, `chat_access_emails`),
+   so on the LAN or on 127.0.0.1 there is no chat. One question at a time, at most 10 a minute.
 
 **Park + handoff**: an open session's Park becomes this while its cache is warm and it is past
 `park_handoff_tokens` (50k); it needs the hook. It types `park handoff:` into the session: Claude
