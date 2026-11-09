@@ -123,15 +123,22 @@ DEFAULTS = {
     "fork_command": "claude --resume {session_id} --fork-session --model {model}",
     # New session from the page (project, branch, model, first message), through a launcher of yours
     # that knows your projects and worktrees. All three set = the page offers it; any empty = off.
-    # projects_command prints JSON: [{"id", "label", "context", "type", "path", "worktrees":
-    #   [{"path", "branch", "last_accessed", "model"}], "model"}]. Run by valet, not in a pane.
-    # prepare_command finds or creates the directory for {target} ("id" or "id@branch") and prints
-    #   {"path", "branch", "created", "project"}; its stderr is the error the page shows. Run by valet.
+    # projects_command prints JSON: [{"id", "label", "context", "type", "path", "source", "plugins",
+    #   "mcps", "worktrees": [{"path", "branch", "last_accessed", "model", "plugins"}], "model"}].
+    #   Run by valet, not in a pane. source is team|mine|both; plugins is the repo's enabledPlugins.
+    # prepare_command finds or creates the directory for {target} ("id", "id@branch" or
+    #   "adhoc:[name]", a dated scratch directory) and prints {"path", "branch", "created",
+    #   "project"}; its stderr is the error the page shows. Run by valet.
     # launch_command starts Claude in a new herdr tab in that directory: {path}, {model}, {prompt},
     #   {plugins} (each already shell-quoted; empty when not chosen).
     "projects_command": "",
     "prepare_command": "",
     "launch_command": "",
+    # Optional: add or remove your own projects from the page. Valet appends {args} (shell-quoted):
+    #   add <dir> --id ID --label L --context C --type single|direct   prints {"id", ...}
+    #   remove <id>                                                      prints {"id", "removed"}
+    # Empty = the page does not offer it.
+    "project_command": "",
     # Its first message. {handoff} is the handoff file's absolute path.
     "continue_prompt": "Continue the work handed over in {handoff}: read it first, then carry on from where it leaves off.",
     # `fresh`: a parked session started over without its history (none of it to re-cache), from a
@@ -1144,7 +1151,7 @@ def workspace_for(path: str) -> str | None:
     return None
 
 
-TARGET_RE = re.compile(r"^[A-Za-z0-9._-]+(@[A-Za-z0-9._/-]+)?$")
+TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]+(@[A-Za-z0-9._/-]+)?|adhoc:[^/\n]{0,60})$")
 
 
 def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "") -> dict:
@@ -1180,6 +1187,65 @@ def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "
     log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})")
     return {"workspace": ws_id, "pane": pane, "path": path, "branch": prep.get("branch"),
             "created": bool(prep.get("created"))}
+
+
+PROJECT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def project_add(path: str, pid: str = "", label: str = "", context: str = "", ptype: str = "single") -> dict:
+    """Add one of your own projects (an existing clone) to the launcher's registry."""
+    if not CONF["project_command"]:
+        raise ValueError("project management is off: set project_command")
+    path = os.path.expanduser(path.strip())
+    if not path or not Path(path).is_dir():
+        raise ValueError(f"no such directory: {path or '(empty)'}")
+    args = ["add", path, "--type", ptype or "single"]
+    for flag, v in (("--id", pid), ("--label", label), ("--context", context)):
+        if v.strip():
+            args += [flag, v.strip()]
+    if pid.strip() and not PROJECT_ID_RE.match(pid.strip()):
+        raise ValueError("the id is lowercase letters, digits and -")
+    out = json.loads(_run_launcher(CONF["project_command"].format(args=shlex.join(args + ["--json"])), 30))
+    log(f"project added: {out.get('id')} ({path})")
+    return out
+
+
+def project_remove(pid: str) -> dict:
+    """Take one of your projects out of the registry; its directory and worktrees stay."""
+    if not CONF["project_command"]:
+        raise ValueError("project management is off: set project_command")
+    if not PROJECT_ID_RE.match(pid or ""):
+        raise ValueError("invalid project id")
+    out = json.loads(_run_launcher(CONF["project_command"].format(args=shlex.join(["remove", pid, "--json"])), 30))
+    log(f"project removed: {pid}")
+    return out
+
+
+_PLUGINS_CACHE: dict = {}
+
+
+def installed_plugins() -> list[dict]:
+    """The plugins installed in user scope (any session can turn them on), one row per id:
+    {"id", "always"}. always = enabled in ~/.claude/settings.json, so every session gets it; the
+    page offers the others per session. Local- and project-scope installs belong to one folder and
+    are left out (the repo's own declaration comes with projects_command). Cached for a minute
+    (`claude plugin list` takes ~0.8 s)."""
+    now = time.time()
+    if _PLUGINS_CACHE.get("at", 0) > now - 60:
+        return _PLUGINS_CACHE["rows"]
+    try:
+        out = subprocess.run(["claude", "plugin", "list", "--json"], capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL)
+        ids = sorted({p["id"] for p in json.loads(out.stdout or "[]") if p.get("id") and p.get("scope") == "user"})
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        ids = []
+    try:
+        user = json.loads((Path.home() / ".claude" / "settings.json").read_text()).get("enabledPlugins") or {}
+    except (OSError, ValueError):
+        user = {}
+    rows = [{"id": i, "always": bool(user.get(i))} for i in ids]
+    _PLUGINS_CACHE.update(at=now, rows=rows)
+    return rows
 
 
 # --------------------------------------------------------------------------- restart, fork, park-all

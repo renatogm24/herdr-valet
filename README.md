@@ -43,9 +43,13 @@ herdr-valet:
    pane they run in, so a skill or command inside the session can call them.
 9. **Starts new sessions (optional):** with a launcher of yours that knows your projects and
    worktrees (`projects_command`, `prepare_command`, `launch_command`), **New session** on the page
-   picks a project, an existing worktree or a new branch, the model and an optional first message,
-   and opens Claude in a new tab of the workspace that already holds that repository. Errors from
-   the launcher (a bad branch name, a repo not cloned) come back to the page.
+   picks a context, one of its projects, an existing worktree or a new branch (or an ad-hoc scratch
+   folder), the model (Opus unless the folder remembers another), an optional first message and the
+   plugins for that folder (checked as the repo declares them; the repo's MCPs are shown, not
+   chosen), and opens Claude in a new tab of the workspace that already holds that repository.
+   Errors from the launcher (a bad branch name, a repo not cloned) come back to the page. With
+   `project_command` set, the page also adds your own projects (an existing clone) and removes them
+   from the list; the folders stay.
 10. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
    session's card in parallel and only then closes them, as one batch; `restore` reopens the
    newest batch, each session in its project's workspace, in the order they sat in herdr's
