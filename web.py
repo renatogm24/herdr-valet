@@ -20,9 +20,6 @@ import os
 import pwd
 import re
 import sys
-import threading
-import time
-from collections import deque
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -37,10 +34,6 @@ SESSION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 PANE_RE = re.compile(r"^w[0-9A-Za-z]+:p[0-9A-Za-z]+$")
 PANE_ACTIONS = ("park", "recap", "switch", "restart", "fork", "relaunch")
 PAGE = Path(__file__).resolve().parent / "web.html"
-# The chat: one question at a time, at most CHAT_PER_MIN a minute (each is two Haiku calls).
-CHAT_LOCK = threading.Lock()
-CHAT_TIMES: deque = deque(maxlen=10)
-CHAT_PER_MIN = 10
 # Only requests with a loopback Host are served. Without this, DNS rebinding lets a page from
 # another site become "same origin" with this one, read the summaries and send actions with
 # X-Parking. A proxy in front (nginx with proxy_pass to 127.0.0.1) sends this Host by default.
@@ -143,8 +136,7 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             self._send(200, PAGE.read_bytes(), "text/html; charset=utf-8")
         elif path == "/api/state":
-            # The chat shows only to someone Cloudflare Access let in (see valet.access_email).
-            self._json(200, {**state(), "chat": bool(self._access_email())})
+            self._json(200, state())
         elif path == "/api/projects":
             try:
                 self._json(200, {"projects": valet.projects(), "plugins": valet.installed_plugins(),
@@ -183,36 +175,6 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
 
-    def _access_email(self) -> str | None:
-        return valet.access_email(self.headers.get("Cf-Access-Jwt-Assertion", ""))
-
-    def _chat(self) -> None:
-        """A question about past sessions; the answer suggests, the page's buttons act."""
-        if not self._access_email():
-            self._json(HTTPStatus.FORBIDDEN, {"error": "the chat only opens through Cloudflare Access"})
-            return
-        now = time.time()
-        if len(CHAT_TIMES) >= CHAT_PER_MIN and now - CHAT_TIMES[-CHAT_PER_MIN] < 60:
-            self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "too many questions: wait a minute"})
-            return
-        if not CHAT_LOCK.acquire(blocking=False):
-            self._json(HTTPStatus.TOO_MANY_REQUESTS, {"error": "one question at a time"})
-            return
-        try:
-            CHAT_TIMES.append(now)
-            n = int(self.headers.get("Content-Length") or 0)
-            if n > 20000:
-                raise ValueError("too long")
-            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
-            history = body.get("history") if isinstance(body.get("history"), list) else []
-            self._json(200, {"ok": True, **valet.chat(str(body.get("question") or ""), history)})
-        except ValueError as e:
-            self._json(400, {"error": str(e)})
-        except Exception as e:  # noqa: BLE001
-            self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
-        finally:
-            CHAT_LOCK.release()
-
     def _project(self, action: str) -> None:
         """Add or remove one of your projects: the fields go in the body."""
         try:
@@ -245,13 +207,10 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/new":
             self._new()
             return
-        if url.path == "/api/chat":
-            self._chat()
-            return
         if url.path in ("/api/project-add", "/api/project-remove"):
             self._project(url.path.rsplit("-", 1)[1])
             return
-        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context|reopen)/([^/]+)", url.path)
+        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -285,13 +244,6 @@ class Handler(BaseHTTPRequestHandler):
                     if not profile:
                         raise ValueError("switch needs ?as=<profile>")
                     self._json(200, {"ok": True, "workspace": valet.switch(target, profile)})
-                return
-            if action == "reopen":
-                # A session without a card (from the chat): resume it, or fork it with ?fork=1.
-                if not SESSION_RE.match(target):
-                    raise ValueError("invalid session")
-                fork = bool(parse_qs(url.query).get("fork"))
-                self._json(200, {"ok": True, **valet.reopen(target, fork)})
                 return
             if not SESSION_RE.match(target) or not valet.card_path(target).exists():
                 raise ValueError("no card for that session")

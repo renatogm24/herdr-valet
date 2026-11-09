@@ -265,14 +265,6 @@
   .newsess .ns-add { grid-column: 1 / -1; display: grid; gap: var(--u); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     border: 1px dashed var(--rule-strong); border-radius: 8px; padding: var(--u); }
   .newsess small.bad { color: var(--bad); }
-  .chat-log { display: flex; flex-direction: column; gap: calc(var(--u) * 1.5); max-height: 55vh; overflow-y: auto; }
-  .chat-turn { display: flex; flex-direction: column; gap: 6px; }
-  .chat-q { align-self: flex-end; max-width: 85%; background: var(--accent-soft); color: var(--ink); border-radius: 10px 10px 2px 10px;
-    padding: 6px 10px; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .chat-a { margin: 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .chat-hit { border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
-    background: var(--panel); overflow-wrap: anywhere; }
-  .chat-hit-t { color: var(--ink); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
   .cmd { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; flex-basis: 100%; }
   .cmd code { background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; user-select: all; overflow-wrap: anywhere; }
@@ -327,7 +319,6 @@
       <div class="acts" id="all-acts"></div>
       <div class="note" id="all-note"></div>
     </div>
-    <form class="newsess chat" id="chat-panel" hidden aria-label="Ask about your sessions" autocomplete="off"></form>
     <form class="newsess" id="new-panel" hidden aria-label="New session" autocomplete="off"></form>
     <div class="platform" id="live"><div class="sk" style="height:42px;width:260px"></div><div class="sk" style="height:42px;width:220px"></div></div>
   </section>
@@ -654,15 +645,6 @@ function relaunchHtml(s) {
 function renderAllActions() {
   const acts = $("all-acts"), note = $("all-note");
   acts.replaceChildren();
-  if (ST.chat) {
-    const btn = document.createElement("button");
-    btn.className = "btn small";
-    btn.textContent = "Ask";
-    btn.title = "Ask about your sessions: what you worked on, where it was left, or open a new one";
-    btn.setAttribute("aria-expanded", String(!$("chat-panel").hidden));
-    btn.onclick = () => ($("chat-panel").hidden ? openChat() : closeChat());
-    acts.append(btn);
-  }
   if (ST.can_launch && ST.herdr_running) {
     const btn = document.createElement("button");
     btn.className = "btn small";
@@ -702,165 +684,6 @@ async function runAll(btn, msg, path, problems) {
   busy = true; buttons.forEach((b) => (b.disabled = true)); note.className = "note"; note.textContent = msg;
   try { const r = await post(path); busy = false; const p = problems(r); note.className = p ? "note bad" : "note"; note.textContent = p; load(); }
   catch (e) { busy = false; note.className = "note bad"; note.textContent = e.message; buttons.forEach((b) => (b.disabled = false)); }
-}
-
-// ------------------------------------------------------------------ chat
-// Only shown through Cloudflare Access (ST.chat). The model has no tools: valet searches and the
-// model picks among the results. Nothing here acts on its own: every action is a button the person
-// presses (the card's own Resume/Fork/Start fresh, or the New session panel, prefilled).
-let CHAT = [];  // [{q, a, results, new, error}], this page only
-
-function closeChat() {
-  $("chat-panel").hidden = true;
-  renderAllActions();
-}
-
-function openChat() {
-  const form = $("chat-panel");
-  form.hidden = false;
-  renderAllActions();
-  form.innerHTML = `
-    <div class="chat-log wide" id="chat-log" aria-live="polite"></div>
-    <label class="wide">
-      <textarea name="q" rows="2" aria-label="Your question" maxlength="500" placeholder="e.g. A while ago I worked on the bank login, didn't I?  ·  Open a new session in exp-track to fix the timezone"></textarea>
-    </label>
-    <div class="ns-acts wide">
-      <button class="btn small primary" type="submit">Ask</button>
-      <button class="btn small" type="button" data-chat="close">Close</button>
-      <button class="btn small" type="button" data-chat="clear" title="Forget this conversation and start a new one" hidden>New conversation</button>
-      <span class="note" id="chat-note" role="status"></span>
-    </div>`;
-  const f = form.elements;
-  form.querySelector("[data-chat=close]").onclick = closeChat;
-  form.querySelector("[data-chat=clear]").onclick = () => { CHAT = []; renderChat(); f.q.focus(); };
-  form.onkeydown = (e) => {
-    if (e.key === "Escape") { e.preventDefault(); closeChat(); }
-    if (e.key === "Enter" && !e.shiftKey && e.target === f.q) { e.preventDefault(); form.requestSubmit(); }
-  };
-  form.onsubmit = (e) => { e.preventDefault(); chatAsk(); };
-  renderChat();
-  f.q.focus();
-}
-
-function renderChat() {
-  const log = $("chat-log");
-  if (!log) return;
-  const clear = $("chat-panel").querySelector("[data-chat=clear]");
-  if (clear) clear.hidden = !CHAT.length || CHAT.some((t) => t.pending);
-  log.innerHTML = CHAT.length ? "" : `<p class="note">Ask about your sessions, open or past: what you worked on, where it was left, in which project. Answers come from your cards and transcripts; actions are always your click.</p>`;
-  CHAT.forEach((t, i) => {
-    const turn = document.createElement("div");
-    turn.className = "chat-turn";
-    turn.innerHTML = `<p class="chat-q">${esc(t.q)}</p>${t.pending ? `<p class="note">Searching…</p>`
-      : t.error ? `<p class="note bad">${esc(t.error)}</p>`
-      : `${t.a ? `<p class="chat-a">${esc(t.a)}</p>` : ""}${!t.results.length && !t.new ? `<p class="note">Nothing found${t.searched?.length ? ` for: ${esc(t.searched.join(" · "))}` : ""}.</p>` : ""}`}`;
-    for (const r of t.results || []) turn.append(chatResult(r));
-    if (t.new) {
-      const b = document.createElement("button");
-      b.className = "btn small primary"; b.type = "button";
-      b.textContent = `Set up New session in ${t.new.project}${t.new.branch ? `@${t.new.branch}` : ""}`;
-      b.title = "Opens the New session panel with this filled in; nothing starts until you press Start";
-      b.onclick = () => openNewPanel({ project: t.new.project, branch: t.new.branch, prompt: t.new.goal });
-      turn.append(b);
-    }
-    log.append(turn);
-    if (i === CHAT.length - 1) turn.scrollIntoView({ block: "nearest" });
-  });
-}
-
-const STATE_LABEL = { open: "open now", parked: "parked", closed: "closed", resumed: "resumed", transcript: "transcript" };
-
-function chatResult(r) {
-  const row = document.createElement("div");
-  row.className = "chat-hit";
-  row.innerHTML = `<div class="chat-hit-t"><b>${esc(r.title || r.first || r.session_id)}</b></div>
-    <div class="note">${esc(STATE_LABEL[r.state] || r.state)} · ${esc(r.label || "")}${r.branch ? ` [${esc(r.branch)}]` : ""}${r.at ? ` · ${esc(ago(r.at))}` : ""}</div>
-    ${r.where ? `<div class="note">${esc(r.where)}</div>` : ""}`;
-  // The same actions as elsewhere on the page, right here; each one is a click, never the model's.
-  const acts = document.createElement("div");
-  acts.className = "ns-acts";
-  const sid = encodeURIComponent(r.session_id);
-  if (r.state === "parked" || r.state === "closed") {
-    acts.append(
-      chatAct(row, "Resume", `api/resume/${sid}`, "Resumed: it is in a tab of its project in herdr.", true),
-      chatAct(row, "Fork", `api/fork-card/${sid}`, "A copy is open in a new tab; the card stays parked."));
-    const b = document.createElement("button");
-    b.className = "btn small"; b.type = "button"; b.textContent = "Open card";
-    b.title = "Shows its card: summary, cost, Start fresh and more";
-    b.onclick = () => showCard(r.session_id);
-    acts.append(b);
-  } else if (r.state === "open" && r.pane_id) {
-    const pane = encodeURIComponent(r.pane_id);
-    acts.append(
-      chatAct(row, "Restart", `api/restart/${pane}`, "Restarted in the same tab, same conversation.", false,
-        `Restart ${r.label || "this session"}? Claude closes and reopens the same conversation in its tab (loads updates, MCPs and plugins).`),
-      chatAct(row, "Fork", `api/fork/${pane}`, "A copy is open in a new tab next to it."));
-    acts.insertAdjacentHTML("beforeend", `<span class="note">Open in herdr: ${esc(r.label || "")}</span>`);
-  } else if (r.cwd) {
-    acts.append(
-      chatAct(row, "Resume", `api/reopen/${sid}`, "Resumed: it is in a tab of its repository in herdr.", true),
-      chatAct(row, "Fork", `api/reopen/${sid}?fork=1`, "A copy is open in a new tab."));
-  }
-  row.append(acts);
-  const note = document.createElement("span");
-  note.className = "note chat-note"; note.setAttribute("role", "status");
-  row.append(note);
-  return row;
-}
-
-// A button that posts one action and says how it went under the result. primary: the obvious one.
-// confirmText: ask first (Restart interrupts the session).
-function chatAct(row, label, path, done, primary = false, confirmText = "") {
-  const b = document.createElement("button");
-  b.className = `btn small${primary ? " primary" : ""}`; b.type = "button"; b.textContent = label;
-  b.onclick = async () => {
-    if (confirmText && !confirm(confirmText)) return;
-    const note = row.querySelector(".chat-note"), btns = row.querySelectorAll("button");
-    row.querySelector(".cmd")?.remove();
-    btns.forEach((x) => (x.disabled = true)); busy = true;
-    note.className = "note chat-note"; note.textContent = `${label}…`;
-    try {
-      await post(path);
-      note.className = "note ok chat-note"; note.textContent = done;
-      setTimeout(() => { busy = false; load(); }, 1500);
-    } catch (e) {
-      busy = false; btns.forEach((x) => (x.disabled = false));
-      note.className = "note bad chat-note"; note.textContent = e.message;
-      if (e.command) row.append(commandBox(e.command));
-    }
-  };
-  return b;
-}
-
-
-function showCard(id) {
-  if (!ST.parked.some((c) => c.session_id === id)) { load(); return; }
-  const q = $("q");
-  if (q.value) { q.value = ""; q.dispatchEvent(new Event("input")); }
-  if (!visibleCards().some((c) => c.session_id === id)) recentDays = 0;  // just this time, not saved
-  renderMap();
-  select(id, true);
-  DETAIL.scrollIntoView({ block: "start", behavior: "smooth" });
-}
-
-async function chatAsk() {
-  const form = $("chat-panel"), f = form.elements, q = f.q.value.trim(), go = form.querySelector("[type=submit]");
-  if (!q) return;
-  const history = CHAT.filter((t) => !t.error && !t.pending).slice(-4).map((t) => ({ q: t.q, a: t.a || "" }));
-  const turn = { q, pending: true, results: [] };
-  CHAT.push(turn);
-  f.q.value = ""; go.disabled = true; busy = true;
-  renderChat();
-  try {
-    const r = await post("api/chat", { question: q, history });
-    Object.assign(turn, { a: r.answer, results: r.results || [], new: r.new, searched: r.searched });
-  } catch (e) {
-    turn.error = e.message;
-  } finally {
-    turn.pending = false; busy = false; go.disabled = false;
-    renderChat();
-    f.q.focus();
-  }
 }
 
 // ------------------------------------------------------------------ new session
@@ -903,7 +726,7 @@ function closeNewPanel() {
 }
 
 // prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, a new branch, and a first
-// message that points at the card's context file. Or {project, branch, prompt} from the chat.
+// message that points at the card's context file.
 async function openNewPanel(prefill = null) {
   const form = $("new-panel");
   form.hidden = false;
@@ -941,22 +764,17 @@ async function openNewPanel(prefill = null) {
 
   NS = { ctx: "", id: "", wt: "", touched: false };
   const at = (dir) => prefill?.cwd && (prefill.cwd === dir || prefill.cwd.startsWith(dir + "/"));
-  const byId = prefill?.project && PROJECTS.find((x) => x.id === prefill.project);
-  const from = byId || (prefill?.cwd && (PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path))));
+  const from = prefill?.cwd && (PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path)));
   if (from) {
     NS.ctx = from.context || "other";
-    const wt = !byId ? NEW_WT
-      : from.worktrees.find((w) => w.branch && w.branch === prefill.branch)?.path ?? (prefill.branch ? NEW_WT : undefined);
-    nsPickProject(from.id, from.type === "direct" ? null : wt);
-    if (NS.wt === NEW_WT && prefill.branch && f.branch) f.branch.value = prefill.branch;
-    form.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    nsPickProject(from.id, from.type === "direct" ? null : NEW_WT);
   } else {
     const remembered = lsGet("valet-ns-ctx");
     const newest = [...PROJECTS].sort(recency)[0];
     nsPickContext(nsContexts().includes(remembered) ? remembered : (newest?.context || ADHOC));
   }
   if (prefill?.prompt) f.prompt.value = prefill.prompt;
-  (from && NS.wt === NEW_WT && !f.branch?.value ? f.branch : byId ? form.querySelector("[type=submit]") : form.querySelector("#ns-ctx [aria-pressed=true]"))?.focus();
+  (from && NS.wt === NEW_WT ? f.branch : form.querySelector("#ns-ctx [aria-pressed=true]"))?.focus();
 }
 
 function nsPickContext(ctx) {
