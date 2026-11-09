@@ -954,6 +954,144 @@ def switch(pane_id: str, profile: str) -> str:
     return resume_in_herdr(sid, profile)
 
 
+# --------------------------------------------------------------------------- search
+# "I worked on this a while ago, didn't I?": every session valet knows (parked, closed, resumed,
+# open) plus every Claude Code transcript, searched by words, no LLM. A transcript gives its title
+# (ai-title), the first thing the user asked, its directory and branch; a card adds its summary.
+# Transcripts are indexed once and re-read only when they change (cache under data_dir/search/).
+SEARCH_INDEX = DATA / "search" / "index.json"
+SEARCH_WEIGHTS = {"title": 3.0, "summary": 2.0, "first": 2.0, "label": 1.5, "cwd": 1.0, "branch": 1.5}
+
+
+def _fold(text: str) -> str:
+    """Lowercase without accents, so "sesion" finds "sesión"."""
+    import unicodedata
+
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(ch)).lower()
+
+
+def _transcript_facts(p: Path) -> dict:
+    """What search needs from a transcript: its first user message, directory and branch (from the
+    head), title and last activity (from the tail)."""
+    first, cwd, branch = "", "", ""
+    with p.open(errors="replace") as f:
+        for n, line in enumerate(f):
+            if n > 400 or (first and cwd):
+                break
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            cwd = cwd or d.get("cwd") or ""
+            branch = branch or d.get("gitBranch") or ""
+            if not first and d.get("type") == "user" and not d.get("isSidechain") and not d.get("isMeta"):
+                text = _text((d.get("message") or {}).get("content")).strip()
+                if text and not text.startswith(("<system-reminder>", "<command-", "<local-command")):
+                    first = text[:400]
+    return {"first": first, "cwd": cwd, "branch": "" if branch == "HEAD" else branch,
+            "title": last_title(p), "at": last_activity(p).isoformat(timespec="seconds")}
+
+
+def transcript_index() -> dict:
+    """{session_id: facts} for every transcript, refreshed for the ones that changed."""
+    try:
+        old = json.loads(SEARCH_INDEX.read_text())
+    except (OSError, ValueError):
+        old = {}
+    new, changed = {}, False
+    for base in CONFIG_DIRS:
+        for p in base.glob("projects/*/*.jsonl"):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            key = f"{st.st_mtime_ns}:{st.st_size}"
+            hit = old.get(p.stem)
+            if hit and hit.get("key") == key and hit.get("path") == str(p):
+                new[p.stem] = hit
+                continue
+            try:
+                new[p.stem] = {"key": key, "path": str(p), **_transcript_facts(p)}
+                changed = True
+            except OSError:
+                continue
+    if changed or len(new) != len(old):
+        SEARCH_INDEX.parent.mkdir(parents=True, exist_ok=True)
+        tmp = SEARCH_INDEX.with_suffix(".tmp")
+        tmp.write_text(json.dumps(new, ensure_ascii=False))
+        tmp.replace(SEARCH_INDEX)
+    return new
+
+
+def _summary_line(summary: str, label: str) -> str:
+    for line in (summary or "").splitlines():
+        line = line.replace("**", "").strip()
+        if line.lower().startswith(label.lower()):
+            return line.split(":", 1)[-1].strip()
+    return ""
+
+
+def search(query: str, limit: int = 10, with_live: bool = True) -> list[dict]:
+    """Sessions matching every word of `query` (in their title, summary, first message, project,
+    directory or branch), best first: weighted matches, then how recent."""
+    words = [w for w in _fold(query).split() if w]
+    if not words:
+        return []
+    rows: dict[str, dict] = {}
+    for sid, t in transcript_index().items():
+        rows[sid] = {"session_id": sid, "state": "transcript", "title": t.get("title") or "", "summary": "",
+                     "first": t.get("first") or "", "label": Path(t.get("cwd") or "").name, "cwd": t.get("cwd") or "",
+                     "branch": t.get("branch") or "", "at": t.get("at") or ""}
+    resumed = []
+    for p in HISTORY.glob("*.json"):
+        try:
+            resumed.append((json.loads(p.read_text()), "resumed"))
+        except (OSError, ValueError):
+            continue
+    for c, state in [*resumed, *((c, "closed" if c.get("reason") == "closed" else "parked") for c in cards())]:
+        sid = c.get("session_id")
+        if not sid:
+            continue
+        r = rows.setdefault(sid, {"session_id": sid, "first": "", "at": ""})
+        r.update(state=state, title=(title(c) if c.get("summary") else "") or r.get("title", ""), summary=c.get("summary") or "",
+                 label=c.get("label") or r.get("label", ""), cwd=c.get("cwd") or r.get("cwd", ""),
+                 branch=c.get("branch") or r.get("branch", ""),
+                 at=max(r.get("at") or "", c.get("resumed_at") or c.get("parked_at") or ""))
+    if with_live and herdr_running():
+        try:
+            for s in live_sessions():
+                r = rows.setdefault(s["session_id"], {"session_id": s["session_id"], "title": "", "summary": "",
+                                                      "first": "", "branch": "", "at": ""})
+                r.update(state="open", label=display_label(s), cwd=s.get("cwd") or r.get("cwd", ""),
+                         pane_id=s["pane_id"])
+        except Exception as e:  # noqa: BLE001 — search still answers from cards and transcripts
+            log(f"search: could not read herdr: {e}")
+    now = datetime.now(timezone.utc)
+    hits = []
+    for r in rows.values():
+        fields = {k: _fold(r.get(k) or "") for k in SEARCH_WEIGHTS}
+        if not all(any(w in v for v in fields.values()) for w in words):
+            continue
+        score = sum(wt for w in words for k, wt in SEARCH_WEIGHTS.items() if w in fields[k])
+        try:
+            age = (now - datetime.fromisoformat(r["at"].replace("Z", "+00:00"))).total_seconds() / 86400
+        except (ValueError, KeyError, AttributeError):
+            age = 365.0
+        r["score"] = round(score + 2.0 / (1 + age / 7), 2)
+        hits.append(r)
+    hits.sort(key=lambda r: (r["score"], r.get("at") or ""), reverse=True)
+    out = []
+    for r in hits[:limit]:
+        out.append({
+            "session_id": r["session_id"], "state": r["state"], "title": r.get("title") or "",
+            "where": _summary_line(r.get("summary"), "Where we left off") or _summary_line(r.get("summary"), "En qué estábamos"),
+            "first": (r.get("first") or "")[:200], "label": r.get("label") or "", "cwd": r.get("cwd") or "",
+            "branch": r.get("branch") or "", "at": r.get("at") or "", "score": r["score"],
+            **({"pane_id": r["pane_id"]} if r.get("pane_id") else {}),
+        })
+    return out
+
+
 # --------------------------------------------------------------------------- new session
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
@@ -3003,7 +3141,44 @@ def main() -> int:
     sub.add_parser("sync").add_argument("--dry-run", action="store_true")
     sub.add_parser("feed").add_argument("--dry-run", action="store_true")
     sub.add_parser("config")
+    se = sub.add_parser("search", help="find a session by words: parked, closed, resumed, open, or any transcript")
+    se.add_argument("query", nargs="+")
+    se.add_argument("--limit", type=int, default=10)
+    se.add_argument("--json", action="store_true")
+    nw = sub.add_parser("new", help="start a session in a project (needs projects/prepare/launch_command)")
+    nw.add_argument("target", help='"id" or "id@branch", as the launcher knows them')
+    nw.add_argument("--model", default="")
+    nw.add_argument("--prompt", default="", help="its first message")
+    nw.add_argument("--plugins", default="")
     args = ap.parse_args()
+
+    if args.cmd == "search":
+        rows = search(" ".join(args.query), args.limit)
+        if args.json:
+            print(json.dumps(rows, ensure_ascii=False))
+            return 0
+        if not rows:
+            print("nothing found")
+            return 1
+        for r in rows:
+            where = r["cwd"] + (f" [{r['branch']}]" if r["branch"] else "")
+            print(f"{r['state']:<10} {r['at'][:10]:<10}  {r['label'] or '-':<22} {r['title'] or r['first'][:70]}")
+            print(f"{'':<23}{where}  {r['session_id']}")
+            if r["where"]:
+                print(f"{'':<23}{r['where'][:110]}")
+        return 0
+    if args.cmd == "new":
+        try:
+            r = new_session(args.target, args.model, args.prompt, args.plugins)
+        except HerdrDown as e:
+            print(f"herdr is not running: {e}", file=sys.stderr)
+            return 1
+        except ValueError as e:
+            print(str(e), file=sys.stderr)
+            return 1
+        print(f"started in {r['workspace']} ({r['pane']}): {r['path']}"
+              + (f" [{r['branch']}]" if r.get("branch") else "") + (" — new worktree" if r["created"] else ""))
+        return 0
 
     if args.cmd == "list":
         rows = cards()
