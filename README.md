@@ -140,6 +140,10 @@ it too. `fork_command` is its twin for forks, and must pass `--fork-session` on 
 doesn't, `fork` notices the copy came back as the same session and says so).
 `summary_command` does the same for summaries: if a session belonged to a work account, its
 summary should not go out through your personal one.
+`llm_base_url` and `llm_key_file` send the summaries and recaps through a proxy that speaks the
+Anthropic API (a gateway with a key per service), so they are metered and capped on their own. They
+run with `--setting-sources ""`, which keeps an `apiKeyHelper` in `~/.claude/settings.json` from
+reaching them: this is the way to point them at the proxy.
 
 `profile_command` prints which profile a session runs with and `profiles` lists the ones to
 offer; `resume_command` and `continue_command` get the chosen one as `{profile}`. A card has a

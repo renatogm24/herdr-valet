@@ -19,6 +19,13 @@
 # used (it must end in `exec claude "$@"`).
 # summary_command = "claude"
 
+# A proxy that speaks the Anthropic API (a gateway with a key per service), for the `claude -p` valet
+# runs itself: summaries and recaps. Empty = Claude Code's own login. The summary runs with
+# --setting-sources "", so an apiKeyHelper in ~/.claude/settings.json never reaches it: set it here.
+# The key file holds the key alone (chmod 600).
+# llm_base_url = "http://127.0.0.1:4400"
+# llm_key_file = "~/.config/my-gateway/herdr-valet.key"
+
 # Page port (127.0.0.1). Default 8790 + (uid - 1000): one per user.
 # port = 8790
 
