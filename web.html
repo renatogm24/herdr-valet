@@ -242,6 +242,29 @@
   .newsess .ns-acts { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .newsess .ns-acts .note { margin-left: 4px; }
   .newsess .note.bad { color: var(--bad); }
+  .newsess .field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); min-width: 0; }
+  .newsess .field[hidden], .newsess .ns-add[hidden] { display: none; }
+  .newsess .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .newsess .chip { font: inherit; font-size: 0.8rem; color: var(--ink); background: var(--panel); border: 1px solid var(--rule-strong);
+    border-radius: 999px; padding: 4px 12px; cursor: pointer; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
+  .newsess .chip:hover { border-color: var(--accent); }
+  .newsess .chip[aria-pressed=true] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .newsess .chip[aria-pressed=true] small { color: inherit; }
+  .newsess .chip.add { border-style: dashed; color: var(--muted); }
+  .newsess .chip.add[aria-pressed=true] { color: var(--accent-ink); border-style: solid; }
+  .newsess .chip-wrap { display: inline-flex; align-items: center; max-width: 100%; }
+  .newsess .chip-wrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .newsess .chip-wrap .chip:only-child { border-radius: 999px; }
+  .newsess .chip-x { font: inherit; font-size: 0.8rem; line-height: 1; color: var(--muted); background: var(--panel); border: 1px solid var(--rule-strong);
+    border-left: 0; border-radius: 0 999px 999px 0; padding: 4px 9px 4px 7px; cursor: pointer; align-self: stretch; }
+  .newsess .chip-x:hover { color: var(--bad); border-color: var(--bad); }
+  .newsess .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .newsess .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+  .newsess .checks input { width: auto; }
+  .newsess .checks label.locked { color: var(--muted); cursor: not-allowed; }
+  .newsess .ns-add { grid-column: 1 / -1; display: grid; gap: var(--u); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    border: 1px dashed var(--rule-strong); border-radius: 8px; padding: var(--u); }
+  .newsess small.bad { color: var(--bad); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
   .cmd { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; flex-basis: 100%; }
   .cmd code { background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: 6px 10px; user-select: all; overflow-wrap: anywhere; }
@@ -665,117 +688,309 @@ async function runAll(btn, msg, path, problems) {
 
 // ------------------------------------------------------------------ new session
 // The launcher (projects_command) knows the projects and their worktrees; valet only shows them.
-// A branch of a project with worktrees opens that worktree, or creates it (prepare_command).
-const MODELS = [["opusplan", "Opus Plan"], ["opus", "Opus"], ["sonnet", "Sonnet"], ["haiku", "Haiku"], ["", "Claude's default"]];
-let PROJECTS = [];
+// Same steps as `code anku` / `code personal`: a context, then one of its projects, then one of its
+// worktrees or a new branch (prepare_command creates it). "ad-hoc" is a dated scratch directory.
+const MODELS = [["opus", "Opus"], ["opusplan", "Opus Plan"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
+const ADHOC = "ad-hoc", NEW_WT = "__new__";
+let PROJECTS = [], PLUGINS = [], USER_MCPS = [], CAN_EDIT = false;
+// What the panel has chosen: context, project id, worktree path (or NEW_WT), plugins touched.
+let NS = { ctx: "", id: "", wt: "", touched: false };
+
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
+const recency = (a, b) => (b.last_accessed || 0) - (a.last_accessed || 0);
+const shortPlugin = (id) => id.split("@")[0];
+
+async function loadProjects() {
+  const r = await fetch("api/projects", { cache: "no-store" });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+  PROJECTS = data.projects || [];
+  PLUGINS = data.plugins || [];
+  USER_MCPS = data.user_mcps || [];
+  CAN_EDIT = !!data.can_edit;
+}
+
+// Contexts in the registry's order (anku, personal, …), then ad-hoc.
+function nsContexts() {
+  const seen = [];
+  for (const p of PROJECTS) if (!seen.includes(p.context || "other")) seen.push(p.context || "other");
+  return [...seen, ADHOC];
+}
+const nsProject = () => PROJECTS.find((p) => p.id === NS.id) || null;
+const nsWorktree = () => nsProject()?.worktrees.find((w) => w.path === NS.wt) || null;
 
 function closeNewPanel() {
   $("new-panel").hidden = true;
   renderAllActions();
 }
 
-// prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, and a first message that
-// points at the card's context file.
+// prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, a new branch, and a first
+// message that points at the card's context file.
 async function openNewPanel(prefill = null) {
   const form = $("new-panel");
   form.hidden = false;
   renderAllActions();
   form.innerHTML = `<p class="note wide">Loading your projects…</p>`;
   try {
-    const r = await fetch("api/projects", { cache: "no-store" });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
-    PROJECTS = data.projects;
+    await loadProjects();
   } catch (e) {
     form.innerHTML = `<p class="note bad wide">Could not list projects: ${esc(e.message)}</p>
       <div class="ns-acts wide"><button class="btn small" type="button" data-ns="cancel">Close</button></div>`;
     form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
     return;
   }
-  // Grouped by context, the most recently used first (in the groups and inside them).
-  const groups = new Map();
-  for (const p of [...PROJECTS].sort((a, b) => (b.last_accessed || 0) - (a.last_accessed || 0))) {
-    const g = p.context || "other";
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(p);
-  }
   form.innerHTML = `
-    <label>Project
-      <select name="project" required>
-        <option value="">Choose a project…</option>
-        ${[...groups].map(([g, ps]) => `<optgroup label="${esc(g)}">${ps.map((p) =>
-          `<option value="${esc(p.id)}">${esc(p.label)} · ${esc(p.id)}</option>`).join("")}</optgroup>`).join("")}
-      </select>
-    </label>
-    <label>Branch
-      <input name="branch" list="ns-branches" placeholder="existing or new" spellcheck="false">
-      <small id="ns-bhint"></small>
-    </label>
-    <datalist id="ns-branches"></datalist>
+    <div class="field wide"><span>Where</span><div class="chips" id="ns-ctx" role="group" aria-label="Context"></div></div>
+    <div class="field wide" id="ns-proj-f"><span>Project</span><div id="ns-proj"></div></div>
+    <div class="ns-add wide" id="ns-add" hidden></div>
+    <div class="field wide" id="ns-where-f"><span id="ns-where-l">Worktree</span><div id="ns-where"></div></div>
     <label>Model
-      <select name="model">${MODELS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
+      <select name="model"></select>
     </label>
     <label class="wide">Goal or context <small>(optional: the session's first message; empty, it waits for you)</small>
       <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing"></textarea>
     </label>
-    <details class="wide"><summary>Plugins for this session</summary>
-      <label><input name="plugins" placeholder="+meta-ads,-confluence  or  none" spellcheck="false">
-        <small>Empty: what the repo declares. It is remembered for this directory.</small></label>
-    </details>
+    <div class="field wide" id="ns-plugins"></div>
     <div class="ns-acts wide">
       <button class="btn small primary" type="submit">Start</button>
       <button class="btn small" type="button" data-ns="cancel">Cancel</button>
       <span class="note" id="ns-note" role="status" aria-live="polite"></span>
     </div>`;
   const f = form.elements;
-  const proj = () => PROJECTS.find((p) => p.id === f.project.value);
-  const hint = () => {
-    const p = proj(), b = f.branch.value.trim(), h = $("ns-bhint");
-    if (!p) { h.textContent = ""; return; }
-    if (p.type === "direct") { h.textContent = "Works on its default branch, no worktrees"; return; }
-    if (!p.cloned) { h.textContent = "Not cloned yet: run the launcher once in a terminal"; return; }
-    const wt = p.worktrees.find((w) => w.branch === b);
-    h.textContent = !b ? (p.worktrees[0] ? `Empty: its most recent worktree (${p.worktrees[0].branch})` : "No worktrees yet: type a branch")
-      : wt ? `Opens the worktree at ${wt.path.split("/").pop()}`
-      : "New worktree (the branch is used if it exists here or on origin)";
-  };
-  f.project.onchange = () => {
-    const p = proj();
-    $("ns-branches").innerHTML = (p?.worktrees || []).filter((w) => w.branch).map((w) => `<option value="${esc(w.branch)}">`).join("");
-    const direct = p?.type === "direct";
-    f.branch.disabled = direct;
-    f.branch.value = direct ? (p.worktrees[0]?.branch || "") : "";
-    f.model.value = p?.model && MODELS.some(([v]) => v === p.model) ? p.model : "";
-    hint();
-  };
-  f.branch.oninput = hint;
   form.querySelector("[data-ns=cancel]").onclick = closeNewPanel;
   form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
-  form.onsubmit = async (e) => {
-    e.preventDefault();
-    const p = proj(), note = $("ns-note"), go = form.querySelector("[type=submit]");
-    if (!p) { note.className = "note bad"; note.textContent = "Choose a project"; f.project.focus(); return; }
-    const b = f.branch.value.trim();
-    const target = p.type !== "direct" && b ? `${p.id}@${b}` : p.id;
-    busy = true; go.disabled = true; note.className = "note";
-    note.textContent = b && !p.worktrees.some((w) => w.branch === b) ? "Creating the worktree, then starting Claude…" : "Starting Claude…";
-    try {
-      const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: f.plugins.value.trim() });
-      busy = false;
-      note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? " (new worktree)" : ""}. It shows up under Open now in a few seconds.`;
-      setTimeout(() => { closeNewPanel(); load(); }, 2500);
-    } catch (err) {
-      busy = false; go.disabled = false;
-      note.className = "note bad"; note.textContent = err.message;
-    }
-  };
-  if (prefill?.cwd) {
-    const at = (dir) => prefill.cwd === dir || prefill.cwd.startsWith(dir + "/");
-    const p = PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path));
-    if (p) { f.project.value = p.id; f.project.onchange(); }
+  form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
+
+  NS = { ctx: "", id: "", wt: "", touched: false };
+  const at = (dir) => prefill?.cwd && (prefill.cwd === dir || prefill.cwd.startsWith(dir + "/"));
+  const from = prefill?.cwd && (PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path)));
+  if (from) {
+    NS.ctx = from.context || "other";
+    nsPickProject(from.id, from.type === "direct" ? null : NEW_WT);
+  } else {
+    const remembered = lsGet("valet-ns-ctx");
+    const newest = [...PROJECTS].sort(recency)[0];
+    nsPickContext(nsContexts().includes(remembered) ? remembered : (newest?.context || ADHOC));
   }
   if (prefill?.prompt) f.prompt.value = prefill.prompt;
-  (prefill?.cwd && f.project.value ? f.branch : f.project).focus();
+  (from && NS.wt === NEW_WT ? f.branch : form.querySelector("#ns-ctx [aria-pressed=true]"))?.focus();
+}
+
+function nsPickContext(ctx) {
+  NS.ctx = ctx;
+  lsSet("valet-ns-ctx", ctx);
+  const newest = PROJECTS.filter((p) => (p.context || "other") === ctx).sort(recency)[0];
+  if (ctx === ADHOC || !newest) { NS.id = ""; NS.wt = ""; nsRender(); return; }
+  nsPickProject(newest.id);
+}
+
+// wt: a worktree path, NEW_WT, or nothing for the project's most recent worktree.
+function nsPickProject(id, wt) {
+  NS.id = id;
+  const p = nsProject();
+  NS.wt = p?.type === "direct" ? (p.worktrees[0]?.path || "") : (wt ?? (p?.worktrees[0]?.path || NEW_WT));
+  NS.touched = false;
+  nsRender();
+}
+
+function nsRender() {
+  const form = $("new-panel"), f = form.elements, p = nsProject(), adhoc = NS.ctx === ADHOC;
+  $("ns-ctx").innerHTML = nsContexts().map((c) =>
+    `<button type="button" class="chip" data-ctx="${esc(c)}" aria-pressed="${c === NS.ctx}">${esc(c)}</button>`).join("");
+  $("ns-ctx").querySelectorAll("[data-ctx]").forEach((b) => (b.onclick = () => nsPickContext(b.dataset.ctx)));
+
+  // Project: the context's projects, most recent first; yours can be removed. Ad-hoc: just a name.
+  $("ns-proj-f").firstElementChild.textContent = adhoc ? "Name" : "Project";
+  if (adhoc) {
+    $("ns-proj").innerHTML = `<input name="adhoc" maxlength="60" placeholder="optional: names the dated folder, e.g. compare-bank-apis" spellcheck="false">
+      <small>A new scratch folder, no git, in the launcher's ad-hoc directory</small>`;
+  } else {
+    const ps = PROJECTS.filter((x) => (x.context || "other") === NS.ctx).sort(recency);
+    $("ns-proj").innerHTML = `<div class="chips" role="group" aria-label="Project">${ps.map((x) => `<span class="chip-wrap">
+        <button type="button" class="chip" data-proj="${esc(x.id)}" aria-pressed="${x.id === NS.id}" title="${esc(x.id)} · ${esc(x.path)}">${esc(x.label)}${x.cloned ? "" : ` <small>not cloned</small>`}</button>${
+        CAN_EDIT && x.source !== "team" ? `<button type="button" class="chip-x" data-rm="${esc(x.id)}" title="Remove ${esc(x.label)} from your projects (the folder stays)" aria-label="Remove ${esc(x.label)}">×</button>` : ""}</span>`).join("")}
+        ${CAN_EDIT ? `<button type="button" class="chip add" data-ns="add">+ Add project</button>` : ""}</div>`;
+    $("ns-proj").querySelectorAll("[data-proj]").forEach((b) => (b.onclick = () => nsPickProject(b.dataset.proj)));
+    $("ns-proj").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => nsRemoveProject(b.dataset.rm)));
+    const add = $("ns-proj").querySelector("[data-ns=add]");
+    if (add) add.onclick = () => nsShowAdd();
+  }
+
+  // Worktree: the project's worktrees by branch, most recent first, or a new branch.
+  const where = $("ns-where");
+  $("ns-where-f").hidden = adhoc || !p;
+  if (p && !adhoc) {
+    $("ns-where-l").textContent = p.type === "direct" ? "Branch" : "Worktree";
+    if (!p.cloned) {
+      where.innerHTML = `<small class="bad">Not cloned yet: run <code>code</code> once in a terminal to clone it</small>`;
+    } else if (p.type === "direct") {
+      where.innerHTML = `<small>Works in its folder, on <b>${esc(p.worktrees[0]?.branch || "its branch")}</b>: no worktrees</small>`;
+    } else {
+      where.innerHTML = `<div class="chips" role="group" aria-label="Worktree">${p.worktrees.map((w) =>
+        `<button type="button" class="chip" data-wt="${esc(w.path)}" aria-pressed="${w.path === NS.wt}" title="${esc(w.path)}">${esc(w.branch || w.path.split("/").pop())}</button>`).join("")}
+        <button type="button" class="chip add" data-wt="${NEW_WT}" aria-pressed="${NS.wt === NEW_WT}">+ New branch</button></div>
+        ${NS.wt === NEW_WT ? `<input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false">
+          <small>New worktree; the branch is used if it exists here or on origin</small>` : ""}`;
+      where.querySelectorAll("[data-wt]").forEach((b) => (b.onclick = () => {
+        NS.wt = b.dataset.wt; NS.touched = false; nsRender();
+        if (NS.wt === NEW_WT) $("new-panel").elements.branch?.focus();
+      }));
+    }
+  } else {
+    where.innerHTML = "";
+  }
+
+  // Model: the worktree's saved one, else the project's, else Opus.
+  const want = nsWorktree()?.model || p?.model || "opus";
+  const models = MODELS.some(([v]) => v === want) ? MODELS : [...MODELS, [want, want]];
+  f.model.innerHTML = models.map(([v, l]) => `<option value="${esc(v)}" ${v === want ? "selected" : ""}>${esc(l)}</option>`).join("");
+
+  nsRenderPlugins();
+}
+
+// Plugins: the ones that are not on for every session, checked as the repo declares them, then as
+// last chosen in this folder. MCPs are not chosen here: the repo's (.mcp.json) and your user-scope
+// ones always load, so they show checked and locked.
+function nsPluginBase() {
+  const declared = (NS.ctx === ADHOC ? null : nsProject()?.plugins) || {};
+  // A disabled copy of an always-on plugin from another marketplace (caveman twice) is noise.
+  const alwaysNames = new Set(PLUGINS.filter((x) => x.always).map((x) => shortPlugin(x.id)));
+  const ids = [...new Set([...PLUGINS.filter((x) => !x.always && !alwaysNames.has(shortPlugin(x.id))).map((x) => x.id),
+    ...Object.keys(declared)])].sort();
+  return { declared, ids };
+}
+
+function nsApplySpec(on, spec) {
+  if (!spec) return on;
+  if (spec === "none") { for (const k of Object.keys(on)) on[k] = false; return on; }
+  for (const raw of spec.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const name = raw.replace(/^[+-]/, "");
+    const id = name.includes("@") ? name : (PLUGINS.find((x) => shortPlugin(x.id) === name)?.id || name);
+    if (id in on) on[id] = !raw.startsWith("-");
+  }
+  return on;
+}
+
+function nsRenderPlugins() {
+  const box = $("ns-plugins"), p = nsProject();
+  const { declared, ids } = nsPluginBase();
+  const on = nsApplySpec(Object.fromEntries(ids.map((id) => [id, !!declared[id]])), nsWorktree()?.plugins || "");
+  const dup = (id) => ids.filter((x) => shortPlugin(x) === shortPlugin(id)).length > 1;
+  const always = PLUGINS.filter((x) => x.always).map((x) => shortPlugin(x.id));
+  const repoMcps = NS.ctx === ADHOC ? [] : (p?.mcps || []);
+  const mcps = [...repoMcps.map((m) => [m, "repo"]), ...USER_MCPS.filter((m) => !repoMcps.includes(m)).map((m) => [m, "everywhere"])];
+  box.innerHTML = `<span>Plugins <small>(for this folder; remembered)</small></span>
+    ${ids.length ? `<div class="checks">${ids.map((id) => `<label title="${esc(id)}${id in declared ? " · the repo declares it" : ""}">
+      <input type="checkbox" data-plugin="${esc(id)}" ${on[id] ? "checked" : ""}>${esc(dup(id) ? id : shortPlugin(id))}${id in declared ? " <small>repo</small>" : ""}</label>`).join("")}</div>`
+      : `<small>No optional plugins installed</small>`}
+    ${always.length ? `<small>Always on: ${esc(always.join(", "))}</small>` : ""}
+    <span>MCPs <small>(${repoMcps.length ? "the repo's .mcp.json and yours" : NS.ctx === ADHOC ? "an ad-hoc folder has only yours" : "this repo declares none; yours"}: they always load)</small></span>
+    ${mcps.length ? `<div class="checks">${mcps.map(([m, from]) => `<label class="locked" title="${from === "repo" ? "Declared in the repo's .mcp.json: change it there" : "User scope (~/.claude.json): every session"}">
+      <input type="checkbox" checked disabled>${esc(m)} <small>${from}</small></label>`).join("")}</div>` : `<small>None</small>`}`;
+  box.querySelectorAll("[data-plugin]").forEach((c) => (c.onchange = () => (NS.touched = true)));
+}
+
+// The --plugins spec: "" (untouched: keep what the folder has), "+" (back to what the repo declares)
+// or the differences from the repo's declaration.
+function nsPluginSpec() {
+  if (!NS.touched) return "";
+  const { declared } = nsPluginBase();
+  const diff = [...$("ns-plugins").querySelectorAll("[data-plugin]")]
+    .filter((c) => c.checked !== !!declared[c.dataset.plugin])
+    .map((c) => `${c.checked ? "+" : "-"}${c.dataset.plugin}`);
+  return diff.join(",") || "+";
+}
+
+async function nsStart() {
+  const form = $("new-panel"), f = form.elements, note = $("ns-note"), go = form.querySelector("[type=submit]");
+  const p = nsProject(), bad = (msg, el) => { note.className = "note bad"; note.textContent = msg; el?.focus(); };
+  let target, creating = false, branch = "";
+  if (NS.ctx === ADHOC) {
+    target = `adhoc:${f.adhoc.value.trim()}`;
+    creating = true;
+  } else if (!p) {
+    return bad("Choose a project");
+  } else if (!p.cloned) {
+    return bad("That project is not cloned yet");
+  } else if (p.type === "direct") {
+    target = p.id;
+  } else if (NS.wt === NEW_WT) {
+    branch = f.branch.value.trim();
+    if (!branch) return bad("Type the new branch's name", f.branch);
+    target = `${p.id}@${branch}`;
+    creating = !p.worktrees.some((w) => w.branch === branch);
+  } else {
+    const w = nsWorktree();
+    if (!w?.branch) return bad("That worktree has no branch (detached HEAD): open it from a terminal");
+    target = `${p.id}@${w.branch}`;
+  }
+  busy = true; go.disabled = true; note.className = "note";
+  note.textContent = creating ? `Creating the ${NS.ctx === ADHOC ? "folder" : "worktree"}, then starting Claude…` : "Starting Claude…";
+  try {
+    const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: nsPluginSpec() });
+    busy = false;
+    note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? ` (new ${NS.ctx === ADHOC ? "folder" : "worktree"})` : ""}. It shows up under Open now in a few seconds.`;
+    setTimeout(() => { closeNewPanel(); load(); }, 2500);
+  } catch (err) {
+    busy = false; go.disabled = false;
+    bad(err.message);
+  }
+}
+
+// Your own projects (the launcher's personal overlay): add an existing clone, or take one out.
+function nsShowAdd() {
+  const box = $("ns-add"), ctxs = nsContexts().filter((c) => c !== ADHOC);
+  box.hidden = false;
+  box.innerHTML = `
+    <label class="wide">Folder <small>(an existing clone)</small><input name="ap_path" placeholder="~/code/personal/my-repo" spellcheck="false"></label>
+    <label>Name <small>(optional)</small><input name="ap_label" placeholder="from the folder"></label>
+    <label>Id <small>(optional)</small><input name="ap_id" placeholder="from the folder" spellcheck="false"></label>
+    <label>Context<input name="ap_ctx" list="ns-ctxs" value="${esc(NS.ctx === ADHOC ? "personal" : NS.ctx)}" spellcheck="false"></label>
+    <datalist id="ns-ctxs">${ctxs.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
+    <label>Type<select name="ap_type"><option value="single">A worktree per branch</option><option value="direct">One folder, its own branch</option></select></label>
+    <div class="ns-acts wide">
+      <button class="btn small primary" type="button" data-ap="go">Add project</button>
+      <button class="btn small" type="button" data-ap="cancel">Cancel</button>
+      <span class="note" id="ap-note" role="status" aria-live="polite"></span>
+    </div>`;
+  const f = $("new-panel").elements;
+  box.querySelector("[data-ap=cancel]").onclick = () => { box.hidden = true; box.innerHTML = ""; };
+  box.querySelector("[data-ap=go]").onclick = nsAddProject;
+  box.querySelectorAll("input").forEach((i) => (i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); nsAddProject(); } }));
+  f.ap_path.focus();
+}
+
+async function nsAddProject() {
+  const f = $("new-panel").elements, note = $("ap-note");
+  if (!f.ap_path.value.trim()) { note.className = "note bad"; note.textContent = "Which folder?"; f.ap_path.focus(); return; }
+  note.className = "note"; note.textContent = "Adding…";
+  try {
+    const r = await post("api/project-add", { path: f.ap_path.value.trim(), label: f.ap_label.value.trim(),
+      id: f.ap_id.value.trim(), context: f.ap_ctx.value.trim(), type: f.ap_type.value });
+    await loadProjects();
+    $("ns-add").hidden = true; $("ns-add").innerHTML = "";
+    const added = PROJECTS.find((x) => x.id === r.id);
+    NS.ctx = added?.context || NS.ctx;
+    nsPickProject(r.id);
+    $("ns-note").className = "note ok"; $("ns-note").textContent = `Added ${r.id}`;
+  } catch (e) {
+    note.className = "note bad"; note.textContent = e.message;
+  }
+}
+
+async function nsRemoveProject(id) {
+  const p = PROJECTS.find((x) => x.id === id);
+  if (!confirm(`Remove ${p?.label || id} from your projects?\n\nIt only leaves the list: ${p?.path || "the folder"} and its worktrees stay.`)) return;
+  const note = $("ns-note");
+  try {
+    await post("api/project-remove", { id });
+    await loadProjects();
+    nsPickContext(nsContexts().includes(NS.ctx) ? NS.ctx : (PROJECTS[0]?.context || ADHOC));
+    note.className = "note ok"; note.textContent = `Removed ${id} from the list`;
+  } catch (e) {
+    note.className = "note bad"; note.textContent = e.message;
+  }
 }
 
 // ------------------------------------------------------------------ the line map

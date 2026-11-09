@@ -73,6 +73,7 @@ class NewSession(unittest.TestCase):
             'case "$1" in\n'
             f'  proj@feat/x) echo \'{{"path": "{WT}", "branch": "feat/x", "created": false, "project": "proj"}}\' ;;\n'
             f'  other) echo \'{{"path": "{OTHER}", "branch": "main", "created": true, "project": "other"}}\' ;;\n'
+            f'  "adhoc:mi cosa") echo \'{{"path": "{OTHER}", "branch": "", "created": true, "project": "adhoc"}}\' ;;\n'
             '  *) printf "\\033[31m✗\\033[0m Proyecto desconocido: %s\\n" "$1" >&2; exit 1 ;;\n'
             "esac\n")
         prep.chmod(0o755)
@@ -127,10 +128,66 @@ class NewSession(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 valet.new_session(bad)
 
+    def test_adhoc_target(self):
+        h = valet.herdr = FakeHerdr({})
+        r = valet.new_session("adhoc:mi cosa", "opus", "", "")
+        self.assertTrue(r["created"])
+        self.assertIn(("workspace", "create", "--cwd", str(OTHER), "--label", "adhoc", "--no-focus"), h.calls)
+        for bad in ("adhoc:a/b", "adhoc:" + "x" * 61, "adhoc:a\nb"):
+            with self.assertRaises(ValueError, msg=bad):
+                valet.new_session(bad)
+
     def test_herdr_down(self):
         valet.herdr_running = lambda: False
         with self.assertRaises(valet.HerdrDown):
             valet.new_session("proj@feat/x")
+
+
+class Projects(unittest.TestCase):
+    """project_command gets its args shell-quoted; off when it is not set."""
+
+    def setUp(self):
+        self.conf = dict(valet.CONF)
+        self.argv = TMP / "argv.txt"
+        cmd = TMP / "project.sh"
+        cmd.write_text("#!/bin/sh\n"
+                       f'printf "%s\\n" "$@" > {self.argv}\n'
+                       'if [ "$1" = add ]; then echo \'{"id": "my-repo"}\'; '
+                       'elif [ "$2" = anku-x ]; then echo "anku-x es del equipo" >&2; exit 1; '
+                       'else echo \'{"id": "x", "removed": true}\'; fi\n')
+        cmd.chmod(0o755)
+        valet.CONF["project_command"] = f"{cmd} {{args}}"
+
+    def tearDown(self):
+        valet.CONF.clear()
+        valet.CONF.update(self.conf)
+
+    def test_add(self):
+        r = valet.project_add(str(OTHER), "", "My repo; ok", "personal", "direct")
+        self.assertEqual(r, {"id": "my-repo"})
+        self.assertEqual(self.argv.read_text().splitlines(),
+                         ["add", str(OTHER), "--type", "direct", "--label", "My repo; ok", "--context", "personal", "--json"])
+
+    def test_add_checks_the_folder_and_id(self):
+        with self.assertRaisesRegex(ValueError, "no such directory"):
+            valet.project_add(str(TMP / "nope"))
+        with self.assertRaisesRegex(ValueError, "lowercase"):
+            valet.project_add(str(OTHER), "Bad Id")
+
+    def test_remove_and_its_error(self):
+        self.assertTrue(valet.project_remove("x")["removed"])
+        self.assertEqual(self.argv.read_text().splitlines(), ["remove", "x", "--json"])
+        with self.assertRaisesRegex(ValueError, "del equipo"):
+            valet.project_remove("anku-x")
+        with self.assertRaises(ValueError):
+            valet.project_remove("$(id)")
+
+    def test_off(self):
+        valet.CONF["project_command"] = ""
+        with self.assertRaisesRegex(ValueError, "off"):
+            valet.project_add(str(OTHER))
+        with self.assertRaisesRegex(ValueError, "off"):
+            valet.project_remove("x")
 
 
 if __name__ == "__main__":

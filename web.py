@@ -139,7 +139,9 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, state())
         elif path == "/api/projects":
             try:
-                self._json(200, {"projects": valet.projects()})
+                self._json(200, {"projects": valet.projects(), "plugins": valet.installed_plugins(),
+                                 "user_mcps": valet.user_mcps(),
+                                 "can_edit": bool(valet.CONF["project_command"])})
             except (ValueError, OSError) as e:
                 self._json(400, {"error": str(e)})
         else:
@@ -173,6 +175,23 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
 
+    def _project(self, action: str) -> None:
+        """Add or remove one of your projects: the fields go in the body."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+            body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            if action == "add":
+                r = valet.project_add(str(body.get("path") or ""), str(body.get("id") or ""),
+                                      str(body.get("label") or ""), str(body.get("context") or ""),
+                                      str(body.get("type") or "single"))
+            else:
+                r = valet.project_remove(str(body.get("id") or ""))
+            self._json(200, {"ok": True, **r})
+        except ValueError as e:
+            self._json(400, {"error": str(e)})
+        except Exception as e:  # noqa: BLE001
+            self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
+
     def do_POST(self):  # noqa: N802
         if not self._host_ok():
             return
@@ -187,6 +206,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if url.path == "/api/new":
             self._new()
+            return
+        if url.path in ("/api/project-add", "/api/project-remove"):
+            self._project(url.path.rsplit("-", 1)[1])
             return
         m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context)/([^/]+)", url.path)
         if not m:
