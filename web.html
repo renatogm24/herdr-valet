@@ -674,7 +674,9 @@ function closeNewPanel() {
   renderAllActions();
 }
 
-async function openNewPanel() {
+// prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, and a first message that
+// points at the card's context file.
+async function openNewPanel(prefill = null) {
   const form = $("new-panel");
   form.hidden = false;
   renderAllActions();
@@ -767,7 +769,13 @@ async function openNewPanel() {
       note.className = "note bad"; note.textContent = err.message;
     }
   };
-  f.project.focus();
+  if (prefill?.cwd) {
+    const at = (dir) => prefill.cwd === dir || prefill.cwd.startsWith(dir + "/");
+    const p = PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path));
+    if (p) { f.project.value = p.id; f.project.onchange(); }
+  }
+  if (prefill?.prompt) f.prompt.value = prefill.prompt;
+  (prefill?.cwd && f.project.value ? f.branch : f.project).focus();
 }
 
 // ------------------------------------------------------------------ the line map
@@ -897,6 +905,8 @@ function renderDetail() {
         `<label style="--pf:${pfColor(p.name)}"><input type="radio" name="pf-${esc(c.session_id)}" value="${esc(p.name)}" ${p.name === (pickedPf[c.session_id] || c.profile) ? "checked" : ""}><span>${esc(p.label)}</span></label>`).join("")}</span>` : ""}
       <button class="btn ${freshFirst ? "" : "primary"}" data-act="resume" title="Reopens the whole conversation${resumeWhy}">Resume${c.profile ? ` on <span class="pf-name">${esc(profileLabel(c.profile))}</span>` : " in herdr"}<span class="cost">${resumeCost}</span><kbd>↵</kbd></button>
       <button class="btn ${freshFirst ? "primary" : ""}" data-act="fresh" title="Costs cents: the new session reads a short context file, not the conversation. A new Claude in the same directory and model, starting from ${handoff ? "the handoff it left, " : ""}this card, what you asked, the files it wrote and the repo as it is now. None of the old conversation is sent again; it can still look things up in the transcript.">${handoff ? "Start fresh from handoff" : "Start fresh"}<span class="cost">&lt; $0.15</span></button>
+      <button class="btn small" data-act="fork-card" title="A copy of this conversation in a new tab (its own session id), to ask it something else; this card stays parked">Fork</button>
+      ${ST.can_launch ? `<button class="btn small" data-act="branch" title="A new session on another branch or worktree, starting from this card's context file (not the conversation); this card stays parked">Other branch…</button>` : ""}
       <button class="btn danger" data-act="delete">Delete card</button>
       <span class="note"></span>
     </div>
@@ -956,6 +966,32 @@ function renderDetail() {
       d.querySelector(".cmd")?.remove();
       if (e.command) d.querySelector(".actions").append(commandBox(e.command));
     }
+  };
+  d.querySelector('[data-act="fork-card"]').onclick = async () => {
+    const as = picked();
+    busy = true; all.forEach((b) => (b.disabled = true));
+    note.className = "note"; note.textContent = "Opening a copy…";
+    try {
+      await post(`api/fork-card/${c.session_id}${as ? `?as=${encodeURIComponent(as)}` : ""}`);
+      note.className = "note ok";
+      note.textContent = `Done: a copy of the conversation is opening in a tab of “${p}”. This card stays here.`;
+      setTimeout(() => { busy = false; note.textContent = ""; all.forEach((b) => (b.disabled = false)); }, 2500);
+    } catch (e) {
+      busy = false;
+      note.className = "note bad"; note.textContent = e.message; all.forEach((b) => (b.disabled = false));
+      d.querySelector(".cmd")?.remove();
+      if (e.command) d.querySelector(".actions").append(commandBox(e.command));
+    }
+  };
+  const branchBtn = d.querySelector('[data-act="branch"]');
+  if (branchBtn) branchBtn.onclick = async () => {
+    note.className = "note"; note.textContent = "Writing the context file…";
+    try {
+      const r = await post(`api/context/${c.session_id}`);
+      note.textContent = "";
+      await openNewPanel({ cwd: r.cwd, prompt: r.prompt });
+      $("new-panel").scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } catch (e) { note.className = "note bad"; note.textContent = e.message; }
   };
   // Confirmation in place, not a browser dialog.
   del.onclick = async () => {

@@ -188,7 +188,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/new":
             self._new()
             return
-        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch)/([^/]+)", url.path)
+        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -231,6 +231,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             elif action == "fresh":
                 self._json(200, {"ok": True, **valet.start_fresh(target, profile=profile)})
+            elif action == "fork-card":
+                self._json(200, {"ok": True, **valet.fork_card(target, profile)})
+            elif action == "context":
+                self._json(200, {"ok": True, **valet.context_for_new(target)})
             else:
                 ws = valet.resume_in_herdr(target, profile)
                 self._json(200, {"ok": True, "workspace": ws})
