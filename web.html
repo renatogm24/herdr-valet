@@ -282,24 +282,34 @@
   /* ------------------------------------------------------------------ projects
      One card per project, its line color on the left like everywhere else; one row per worktree
      with what git says about it, so cleaning up is reading the chips, not running commands. */
-  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; border: 1px solid var(--rule); border-radius: 8px; padding: 2px; margin-bottom: calc(var(--u) * 1.5); }
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; border: 1px solid var(--rule); border-radius: 8px; padding: 2px; }
   .seg button { font: inherit; font-size: 0.8rem; font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
   .seg button[aria-pressed=true] { background: var(--raised); color: var(--ink); }
-  .seg button b { color: var(--ink); margin-left: 4px; }
-  .pj-ctx { margin: calc(var(--u) * 2) 0 var(--u); }
-  .pj-grid { display: flex; flex-direction: column; gap: var(--u); }
-  .pj { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--line); border-radius: 8px; min-width: 0; }
-  .pj-h { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--u); padding: 8px 8px 8px 14px; }
-  .pj-h h3 { font-size: 0.95rem; line-height: 1.3; }
-  .pj-h .id { color: var(--muted); }
-  .pj-h .acts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
-  .pj-h .meta { flex-basis: 100%; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
-  .tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
-    border: 1px solid var(--rule-strong); border-radius: 4px; padding: 0 5px; }
-  .pj-empty { border-top: 1px solid var(--rule); padding: 8px 14px; font-size: 0.82rem; color: var(--muted); }
-  .wts { list-style: none; border-top: 1px solid var(--rule); }
+  .seg button b { color: var(--ink); margin-left: 5px; font-weight: 600; opacity: 0.7; }
+  .pj-tabs { margin: 2px calc(var(--u) * 2) var(--u); }
+  .pj-rows { list-style: none; }
+  .pj-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px var(--u); align-items: center; width: 100%; text-align: left;
+    font: inherit; color: inherit; background: none; border: 0; padding: 7px calc(var(--u) * 2); cursor: pointer; }
+  .pj-row:hover { background: var(--raised); }
+  .pj-row[aria-current="true"] { background: var(--accent-soft); }
+  .pj-row .bullet { width: 12px; height: 12px; border-radius: 50%; background: var(--line); justify-self: center; }
+  .pj-row .t { font-size: 0.88rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pj-row .c { font-size: 0.75rem; color: var(--muted); }
+  .pj-row .s { grid-column: 2 / -1; font-size: 0.75rem; color: var(--muted); }
+  .pj-row .s .w { color: var(--ok); font-weight: 600; }
+  .pj-row .s .u { color: var(--warn); font-weight: 600; }
+  .pj-row .s .o { color: var(--accent); font-weight: 600; }
+  #view-projects .newsess:not(.flat) { margin: calc(var(--u) * 1.5) 0 0; }
+  #pj-detail { --line: var(--rule-strong); }
+  #pj-detail[hidden] { display: none; }
+  #pj-detail h1 .id { font-size: 0.55em; font-weight: 500; color: var(--muted); letter-spacing: 0; vertical-align: middle; }
+  #pj-detail .newsess.flat { padding-left: 0; padding-right: 0; }
+  .pj-wt-h .sect { margin-bottom: var(--u); }
+  .pj-main { display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; font-size: 0.9rem; color: var(--body); }
+  .pj-rows .detail { margin: 4px calc(var(--u) * 1.5) var(--u) calc(var(--u) * 4); }
+  .wts { list-style: none; border: 1px solid var(--rule); border-radius: 8px; }
   .wt { display: grid; grid-template-columns: minmax(110px, 240px) minmax(0, 1fr) auto auto; gap: 6px calc(var(--u) * 1.5); align-items: center;
-    padding: 6px 8px 6px 14px; font-size: 0.84rem; }
+    padding: 6px 8px 6px 12px; font-size: 0.84rem; }
   .wt + .wt { border-top: 1px solid var(--rule); }
   .wt .br { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wt .ago { font-size: 0.76rem; color: var(--muted); white-space: nowrap; }
@@ -313,8 +323,7 @@
     background: var(--bad-soft); border-radius: 6px; padding: 8px 10px; }
   .wt-confirm span { flex-basis: 100%; }
   .wt-confirm label { display: inline-flex; gap: 6px; align-items: center; }
-  .pj > .note { padding: 0 14px 8px; font-size: 0.8rem; }
-  .pj > .note:empty { display: none; }
+  #pj-detail > .note:empty { display: none; }
   .more .menu button:disabled { opacity: 0.6; cursor: default; }
   .more .menu button:disabled:hover { background: none; }
   /* New project: found repos and ad-hoc folders are rows to pick from, not something to type */
@@ -336,7 +345,6 @@
     .wt { grid-template-columns: minmax(0, 1fr) auto; }
     .wt .st-chips { grid-column: 1 / -1; grid-row: 2; }
     .wt .acts { grid-column: 1 / -1; justify-content: flex-start; }
-    .pj-h .acts { margin-left: 0; }
   }
 
   /* loading skeleton */
@@ -407,9 +415,12 @@
       <div class="note" id="pj-note" role="status" aria-live="polite"></div>
     </div>
     <form class="newsess" id="pj-new" hidden aria-label="New project" autocomplete="off"></form>
+    <form class="newsess" id="pj-clean" hidden aria-label="Clean up worktrees" autocomplete="off"></form>
     <datalist id="pj-ctxs"></datalist>
-    <div id="pj-filter"></div>
-    <div id="pj-list"><div class="sk" style="height:90px"></div></div>
+  </section>
+  <section class="board" aria-label="Projects">
+    <nav class="map" id="pj-list" aria-label="Projects by context"><div style="padding:8px 16px;display:grid;gap:12px"><div class="sk" style="height:16px;width:50%"></div><div class="sk" style="height:14px"></div><div class="sk" style="height:14px;width:80%"></div></div></nav>
+    <article class="detail" id="pj-detail" aria-live="polite" hidden></article>
   </section>
 </main>
 
@@ -1300,7 +1311,7 @@ function keepSelection() {
 // create, clone or add projects and clean up worktrees without a terminal. Team projects are
 // read-only here; they change by PR to the launcher's config/projects.conf.
 let VIEW = "sessions";
-let PJ = { data: null, err: "", loading: false, filter: "all", q: "", panel: null, scan: null, editing: null, removing: null, adhoc: null, done: null };
+let PJ = { data: null, err: "", loading: false, tab: "", sel: null, q: "", panel: null, clean: null, scan: null, editing: null, removing: null, adhoc: null, done: null };
 const KINDS = [["single", "A worktree per branch"], ["direct", "One folder, works on its branch"]];
 const kindOptions = (sel) => KINDS.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
 const tilde = (p) => (PJ.data?.home && p && (p === PJ.data.home || p.startsWith(PJ.data.home + "/")) ? "~" + p.slice(PJ.data.home.length) : p || "");
@@ -1366,66 +1377,128 @@ function wtInfo(p, w) {
   return { chips, removable, safe };
 }
 
+// The view is a list and a detail, like Sessions: one line per project of the chosen context (or
+// what the search matches in any), and the selected project's worktrees beside it. On a narrow
+// screen the detail opens under its line.
+const PJD = $("pj-detail");
+const unsavedWt = (w) => !!(w.status?.dirty || w.status?.unpushed);
+const safeList = (only) => (PJ.data?.projects || []).filter((p) => !only || p.id === only)
+  .flatMap((p) => p.worktrees.map((w) => ({ p, w, i: wtInfo(p, w) }))).filter((x) => x.i.safe);
+
 function pjRender() {
   const acts = $("pj-acts"), list = $("pj-list");
-  acts.innerHTML = PJ.data ? `<button class="btn small primary" type="button" data-pj="new" aria-expanded="${!!PJ.panel}">New project</button>
-    <button class="btn small" type="button" data-pj="fetch" title="git fetch --prune in every project, so merged branches and deleted remotes show up">Fetch all</button>` : "";
+  const nSafe = PJ.data ? safeList().length : 0;
+  acts.innerHTML = PJ.data ? `${nSafe ? `<button class="btn small" type="button" data-pj="clean" aria-expanded="${!!PJ.clean}" title="Worktrees you can remove without losing anything: review them and remove them in one go">Clean up ${nSafe}</button>` : ""}
+    <button class="btn small" type="button" data-pj="fetch" title="git fetch --prune in every project, so merged branches and deleted remotes show up">Fetch all</button>
+    <button class="btn small primary" type="button" data-pj="new" aria-expanded="${!!PJ.panel}">New project</button>` : "";
   acts.querySelector("[data-pj=new]")?.addEventListener("click", () => (PJ.panel ? pjClosePanel() : pjOpenPanel("create")));
   acts.querySelector("[data-pj=fetch]")?.addEventListener("click", (e) => pjFetch([], e.currentTarget));
-  if (PJ.err) { list.innerHTML = `<p class="err">Could not list projects: ${esc(PJ.err)}</p>`; $("pj-filter").innerHTML = ""; return; }
+  acts.querySelector("[data-pj=clean]")?.addEventListener("click", () => (PJ.clean ? pjCloseClean() : pjOpenClean(null)));
+  if (list.contains(PJD)) list.after(PJD);
+  if (PJ.err) { list.innerHTML = `<p class="map-empty err">Could not list projects: ${esc(PJ.err)}</p>`; PJD.hidden = true; return; }
   if (!PJ.data) return;
   $("pj-ctxs").innerHTML = pjContexts().map((c) => `<option value="${esc(c)}">`).join("");
-  const all = PJ.data.projects;
-  const infos = new Map(all.map((p) => [p.id, p.worktrees.map((w) => wtInfo(p, w))]));
-  const nSafe = [...infos.values()].flat().filter((i) => i.safe).length;
-  const unsaved = (p) => p.worktrees.some((w) => w.status?.dirty || w.status?.unpushed);
-  const nUnsaved = all.filter(unsaved).length;
+  const all = PJ.data.projects, ctxs = pjContexts().filter((c) => all.some((p) => p.context === c));
   $("c-proj").textContent = all.length;
-  $("pj-filter").innerHTML = `<div class="seg" role="group" aria-label="Show">
-    <button type="button" data-f="all" aria-pressed="${PJ.filter === "all"}">All<b>${all.length}</b></button>
-    <button type="button" data-f="clean" aria-pressed="${PJ.filter === "clean"}" title="Worktrees you can remove without losing anything">Can clean up<b>${nSafe}</b></button>
-    <button type="button" data-f="unsaved" aria-pressed="${PJ.filter === "unsaved"}" title="Projects with uncommitted or unpushed work">Unsaved work<b>${nUnsaved}</b></button></div>`;
-  $("pj-filter").querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { PJ.filter = b.dataset.f; pjRender(); }));
-
+  if (!ctxs.includes(PJ.tab)) {
+    const saved = lsGet("valet-pj-tab");
+    PJ.tab = ctxs.includes(saved) ? saved : ([...all].sort(recency)[0]?.context || ctxs[0]);
+  }
   const words = PJ.q.split(/\s+/).filter(Boolean);
-  const hit = (p) => !words.length || words.every((w) => [p.id, p.label, p.path, p.context, p.owner, ...p.worktrees.map((x) => x.branch)].join(" ").toLowerCase().includes(w));
-  const keep = (p) => hit(p) && (PJ.filter === "all" || (PJ.filter === "clean" ? infos.get(p.id).some((i) => i.safe) : unsaved(p)));
-  const groups = pjContexts().map((c) => [c, all.filter((p) => p.context === c && keep(p)).sort(recency)]).filter(([, ps]) => ps.length);
-  list.innerHTML = groups.map(([c, ps]) => `<h3 class="sect pj-ctx">${esc(c)} <span class="n">${ps.length}</span></h3>
-    <div class="pj-grid">${ps.map((p) => pjCard(p, infos.get(p.id))).join("")}</div>`).join("")
-    || `<p class="empty-line">${words.length ? "No project matches." : PJ.filter === "clean" ? "Nothing to clean up: every worktree has work of its own." : PJ.filter === "unsaved" ? "No uncommitted or unpushed work anywhere." : "No projects yet: New project creates, clones or adds one."}</p>`;
+  const hit = (p) => words.every((w) => [p.id, p.label, p.path, p.context, p.owner, ...p.worktrees.map((x) => x.branch)].join(" ").toLowerCase().includes(w));
+  const shown = (words.length ? all.filter(hit) : all.filter((p) => p.context === PJ.tab)).sort(recency);
+  if (!shown.some((p) => p.id === PJ.sel)) PJ.sel = narrow.matches ? null : shown[0]?.id ?? null;
+
+  const tabs = words.length ? `<p class="map-filter">Searching every context</p>`
+    : `<div class="seg pj-tabs" role="tablist" aria-label="Context">${ctxs.map((c) => {
+        const n = all.filter((p) => p.context === c).length;
+        return `<button type="button" role="tab" data-tab="${esc(c)}" aria-pressed="${c === PJ.tab}" aria-selected="${c === PJ.tab}">${esc(c)}<b>${n}</b></button>`;
+      }).join("")}</div>`;
+  list.innerHTML = `${tabs}<ul class="pj-rows">${shown.map((p) => pjRow(p, words.length)).join("")}</ul>
+    ${shown.length ? "" : `<p class="map-empty">${words.length ? "No project matches." : "No projects here yet."}</p>`}`;
+  list.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.tab = b.dataset.tab; lsSet("valet-pj-tab", PJ.tab); PJ.sel = null; pjRender(); }));
+  list.querySelectorAll(".pj-row").forEach((b) => (b.onclick = () => pjSelect(b.dataset.id, false)));
+  pjRenderDetail();
 }
 
-function pjCard(p, infos) {
-  const team = p.source === "team";
-  let rows = p.worktrees.map((w, i) => [w, infos[i]]);
-  if (PJ.filter === "clean") rows = rows.filter(([, i]) => i.safe);
-  if (PJ.filter === "unsaved") rows = rows.filter(([w]) => w.status?.dirty || w.status?.unpushed);
-  const kind = p.type === "direct" ? "one folder" : p.type === "single" ? "a worktree per branch" : p.type;
-  const meta = [kind, tilde(p.path), p.owner ? `github.com/${p.owner}` : "no GitHub owner", p.base ? `base ${p.base}` : ""].filter(Boolean).join(" · ");
-  const body = !p.cloned ? `<p class="pj-empty">Not cloned yet: run <code>code</code> once in a terminal to clone it</p>`
-    : rows.length ? `<ul class="wts">${rows.map(([w, i]) => wtRow(p, w, i)).join("")}</ul>`
-    : p.type === "single" && !p.worktrees.length ? `<p class="pj-empty">No worktrees yet: New session creates one for a branch</p>` : "";
-  return `<article class="pj" style="--line:${lineColor(p.id)}" data-id="${esc(p.id)}">
-    <header class="pj-h">
-      <h3>${esc(p.label)}</h3><code class="id">${esc(p.id)}</code>${team ? ` <span class="tag" title="From the team registry: it changes by PR to the launcher's config/projects.conf">team</span>` : ""}
-      <div class="acts">
-        <button class="btn small" type="button" data-pa="session" ${p.cloned ? "" : "disabled"} title="Start Claude here${p.type === "single" ? " on a new branch" : ""}">New session</button>
-        <details class="more"><summary class="btn small" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
-          <button type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"}>Fetch<small>git fetch --prune: updates merged and deleted branches</small></button>
-          ${team ? `<button type="button" disabled>Team project<small>Change it by PR to config/projects.conf</small></button>`
-            : `<button type="button" data-pa="edit">Edit<small>Name, context, kind</small></button><hr>
-               <button type="button" data-pa="forget">Remove from the list<small>The folder and its worktrees stay</small></button>`}
-        </div></details>
-      </div>
-      <p class="meta">${esc(meta)}</p>
-    </header>
+// One line: its name and worktree count, then what needs you (to clean up, unsaved, open) and when.
+function pjRow(p, searching) {
+  const infos = p.worktrees.map((w) => wtInfo(p, w));
+  const safe = infos.filter((i) => i.safe).length, unsaved = p.worktrees.filter(unsavedWt).length;
+  const open = p.worktrees.reduce((n, w) => n + (w.open || 0), 0);
+  const bits = [
+    searching ? esc(p.context) : "",
+    safe ? `<span class="w">${safe} to clean up</span>` : "",
+    unsaved ? `<span class="u">${unsaved} unsaved</span>` : "",
+    open ? `<span class="o">${open} open</span>` : "",
+    !p.cloned ? "not cloned" : p.type === "direct" ? "one folder" : !p.worktrees.length ? "no worktrees" : "",
+    p.last_accessed ? short(fromTs(p.last_accessed)) : "",
+  ].filter(Boolean);
+  const n = p.type === "single" && p.worktrees.length ? p.worktrees.length : "";
+  return `<li><button type="button" class="pj-row" data-id="${esc(p.id)}" aria-current="${p.id === PJ.sel}" style="--line:${lineColor(p.id)}"
+      title="${esc(p.id)} · ${esc(tilde(p.path))}">
+    <span class="bullet"></span><span class="t">${esc(p.label)}</span><span class="c" title="${n ? `${n} worktrees` : ""}">${n}</span>
+    <span class="s">${bits.join(" · ")}</span></button></li>`;
+}
+
+function pjSelect(id, focus) {
+  PJ.sel = narrow.matches && PJ.sel === id ? null : id;
+  PJ.editing = null; PJ.removing = null;
+  $("pj-list").querySelectorAll(".pj-row").forEach((b) => b.setAttribute("aria-current", String(b.dataset.id === PJ.sel)));
+  pjRenderDetail();
+  if (focus) $("pj-list").querySelector(`.pj-row[data-id="${CSS.escape(id)}"]`)?.focus();
+}
+
+function pjRenderDetail() {
+  const list = $("pj-list"), p = PJ.data?.projects.find((x) => x.id === PJ.sel);
+  if (list.contains(PJD)) list.after(PJD);
+  PJD.hidden = !p;
+  if (!p) { PJD.innerHTML = ""; return; }
+  if (narrow.matches) list.querySelector(`.pj-row[data-id="${CSS.escape(p.id)}"]`)?.parentElement.append(PJD);
+  PJD.dataset.id = p.id;
+  PJD.style.setProperty("--line", lineColor(p.id));
+  const team = p.source === "team", infos = p.worktrees.map((w) => wtInfo(p, w));
+  const nSafe = infos.filter((i) => i.safe).length;
+  const main = p.type === "direct" ? p.worktrees[0] : null;
+  const facts = [
+    `<span><b>${p.type === "direct" ? "One folder" : p.type === "single" ? "A worktree per branch" : esc(p.type)}</b></span>`,
+    `<span class="path">${esc(tilde(p.path))}</span>`,
+    p.owner ? `<span>github.com/${esc(p.owner)}</span>` : `<span>no GitHub owner</span>`,
+    p.base ? `<span>base ${esc(p.base)}</span>` : "",
+  ].join("");
+  let body;
+  if (!p.cloned) {
+    body = `<p class="empty-line">Not cloned yet: run <code>code</code> once in a terminal to clone it.</p>`;
+  } else if (main) {
+    const i = wtInfo(p, main);
+    body = `<p class="pj-main">Works in its folder, on <b>${esc(main.branch || "its branch")}</b>
+      <span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span></p>`;
+  } else if (!p.worktrees.length) {
+    body = `<p class="empty-line">No worktrees yet: New session creates one for a branch.</p>`;
+  } else {
+    body = `<div class="sect-row pj-wt-h"><h2 class="sect">Worktrees <span class="n">${p.worktrees.length}</span></h2>
+        ${nSafe ? `<button class="btn small" type="button" data-pa="clean" title="Review and remove the ones that lose nothing">Clean up ${nSafe}</button>` : ""}</div>
+      <ul class="wts">${p.worktrees.map((w, k) => wtRow(p, w, infos[k])).join("")}</ul>`;
+  }
+  PJD.innerHTML = `
+    <div class="sign"><span class="bullet"></span>${esc(p.context)}${team ? `<span class="sub">· team</span>` : ""}</div>
+    <h1>${esc(p.label)} <code class="id">${esc(p.id)}</code></h1>
+    <div class="facts">${facts}</div>
+    <div class="actions">
+      <button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session${p.type === "single" ? " on a branch" : ""}</button>
+      <button class="btn" type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"} title="git fetch --prune: updates merged and deleted branches">Fetch</button>
+      <details class="more"><summary class="btn" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
+        ${team ? `<button type="button" disabled>Team project<small>It changes by PR to the launcher's config/projects.conf</small></button>`
+          : `<button type="button" data-pa="edit">Edit<small>Name, context, kind</small></button><hr>
+             <button type="button" data-pa="forget">Remove from the list<small>The folder and its worktrees stay</small></button>`}
+      </div></details>
+    </div>
     ${PJ.editing === p.id ? pjEditForm(p) : ""}
-    ${body}
-    <p class="note" role="status" aria-live="polite"></p>
-  </article>`;
+    <div class="pj-body">${body}</div>
+    <p class="note" role="status" aria-live="polite"></p>`;
 }
 
+// A worktree: its branch, what git says, when it was last used; Session, and Remove behind ⋯.
 function wtRow(p, w, i) {
   const can = w.branch && w.branch !== "(detached)";
   return `<li class="wt" data-path="${esc(w.path)}">
@@ -1433,11 +1506,62 @@ function wtRow(p, w, i) {
     <span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>
     <span class="ago" title="Last session here">${w.last_accessed ? short(fromTs(w.last_accessed)) : ""}</span>
     <span class="acts">
-      <button class="btn small" type="button" data-pa="wt-session" ${can || p.type === "direct" ? "" : "disabled"}>Session</button>
-      ${i.removable ? `<button class="btn small danger" type="button" data-pa="wt-remove" aria-expanded="${PJ.removing === w.path}">Remove</button>` : ""}
+      <button class="btn small" type="button" data-pa="wt-session" ${can ? "" : "disabled"}>Session</button>
+      ${i.removable ? `<details class="more"><summary class="btn small" aria-label="More for ${esc(w.branch || "this worktree")}">⋯</summary><div class="menu">
+        <button type="button" data-pa="wt-remove">Remove worktree…<small>${i.safe ? "Nothing would be lost" : "Shows what would be lost first"}</small></button></div></details>` : ""}
     </span>
     ${PJ.removing === w.path ? wtConfirm(p, w) : ""}
   </li>`;
+}
+
+// ---------------------------------------------- Clean up: every worktree that loses nothing, at once
+function pjOpenClean(only) { PJ.clean = { only }; pjRenderClean(); pjRender(); $("pj-clean").scrollIntoView({ block: "nearest" }); }
+function pjCloseClean() { PJ.clean = null; pjRenderClean(); pjRender(); }
+
+function pjRenderClean() {
+  const form = $("pj-clean");
+  form.hidden = !PJ.clean;
+  if (!PJ.clean) { form.innerHTML = ""; return; }
+  const items = safeList(PJ.clean.only), only = PJ.clean.only && PJ.data.projects.find((p) => p.id === PJ.clean.only);
+  const parked = items.reduce((n, x) => n + (x.w.parked || 0), 0);
+  form.innerHTML = items.length ? `
+    <div class="field wide"><span>Worktrees that lose nothing if removed${only ? ` in ${esc(only.label)}` : ""}
+        <small>(no uncommitted or unpushed work; merged, or no commits of their own; no session open)</small></span>
+      <div class="picks">${items.map(({ p, w }) => `<label class="pick">
+          <input type="checkbox" data-path="${esc(w.path)}" checked>
+          <b>${esc(p.label)} · ${esc(w.branch || "(no branch)")}</b>
+          <small>${w.status?.merged ? `merged into ${esc(p.base)}` : "no commits of its own"} · ${esc(tilde(w.path))}${w.last_accessed ? ` · used ${ago(fromTs(w.last_accessed))}` : ""}</small>
+          <span class="st-chips">${w.parked ? `<span class="sc" title="Its parked cards would no longer resume">${w.parked} parked</span>` : ""}</span></label>`).join("")}</div></div>
+    <label class="inline wide"><input type="checkbox" name="branches" checked> Delete their branches too <small>(only the merged ones; the others stay)</small></label>
+    ${parked ? `<p class="note wide">${parked} parked card${parked > 1 ? "s" : ""} in these folders would no longer resume.</p>` : ""}
+    <div class="ns-acts wide"><button class="btn small danger armed" type="submit">Remove ${items.length} worktree${items.length > 1 ? "s" : ""}</button>
+      <button class="btn small" type="button" data-pc="cancel">Cancel</button>
+      <span class="note" id="pc-note" role="status" aria-live="polite"></span></div>`
+    : `<p class="note wide">Nothing to clean up: every worktree has work of its own.</p>
+      <div class="ns-acts wide"><button class="btn small" type="button" data-pc="cancel">Close</button></div>`;
+  const go = form.querySelector("[type=submit]");
+  const count = () => { const n = form.querySelectorAll("[data-path]:checked").length; if (go) { go.textContent = `Remove ${n} worktree${n === 1 ? "" : "s"}`; go.disabled = !n; } };
+  form.querySelectorAll("[data-path]").forEach((c) => (c.onchange = count));
+  form.querySelector("[data-pc=cancel]").onclick = pjCloseClean;
+  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); pjCloseClean(); } };
+  form.onsubmit = async (e) => {
+    e.preventDefault();
+    const paths = [...form.querySelectorAll("[data-path]:checked")].map((c) => c.dataset.path);
+    const branches = form.elements.branches.checked, note = $("pc-note");
+    go.disabled = true;
+    const failed = [];
+    let done = 0, nBranches = 0;
+    for (const path of paths) {
+      note.className = "note"; note.textContent = `Removing ${done + 1} of ${paths.length}…`;
+      try { const r = await post("api/project-worktree-remove", { path, delete_branch: branches }); done++; if (r.branch_deleted) nBranches++; }
+      catch (err) { failed.push(`${tilde(path)}: ${err.message}`); }
+    }
+    PJ.clean = null; pjRenderClean();
+    const top = $("pj-note");
+    top.className = failed.length ? "note bad" : "note";
+    top.textContent = `Removed ${done} worktree${done === 1 ? "" : "s"}${nBranches ? ` and ${nBranches} branch${nBranches === 1 ? "" : "es"}` : ""}.${failed.length ? ` Could not remove: ${failed.join("; ")}` : ""}`;
+    await pjLoad();
+  };
 }
 
 function wtConfirm(p, w) {
@@ -1486,25 +1610,26 @@ async function pjFetch(ids, btn) {
   btn.disabled = false;
 }
 
-$("pj-list").addEventListener("click", async (e) => {
+PJD.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-pa]");
   if (!b) return;
-  const card = b.closest(".pj"), p = PJ.data.projects.find((x) => x.id === card.dataset.id);
+  const p = PJ.data.projects.find((x) => x.id === PJD.dataset.id);
   const row = b.closest(".wt"), w = row && p.worktrees.find((x) => x.path === row.dataset.path);
-  const note = card.querySelector(":scope > .note");
+  const note = PJD.querySelector(":scope > .note");
   const fail = (err) => { note.className = "note bad"; note.textContent = err.message; b.disabled = false; };
   b.closest("details.more")?.removeAttribute("open");
   switch (b.dataset.pa) {
     case "session": return pjStartSession(p.path, false);
     case "wt-session": return pjStartSession(w.path, true);
     case "fetch": return pjFetch([p.id], b);
-    case "edit": PJ.editing = PJ.editing === p.id ? null : p.id; pjRender(); return document.querySelector(`[data-edit="${CSS.escape(p.id)}"] input`)?.focus();
-    case "edit-cancel": PJ.editing = null; return pjRender();
-    case "wt-remove": PJ.removing = PJ.removing === w.path ? null : w.path; return pjRender();
-    case "wt-cancel": PJ.removing = null; return pjRender();
+    case "clean": return pjOpenClean(p.id);
+    case "edit": PJ.editing = PJ.editing === p.id ? null : p.id; pjRenderDetail(); return PJD.querySelector("[data-edit] input")?.focus();
+    case "edit-cancel": PJ.editing = null; return pjRenderDetail();
+    case "wt-remove": PJ.removing = PJ.removing === w.path ? null : w.path; return pjRenderDetail();
+    case "wt-cancel": PJ.removing = null; return pjRenderDetail();
     case "forget":
       if (!arm(b, `Remove ${p.label}? Click again`, note, `It only leaves the list: ${tilde(p.path)} and its worktrees stay.`)) return;
-      try { await post("api/project-remove", { id: p.id }); await pjLoad(); } catch (err) { fail(err); }
+      try { await post("api/project-remove", { id: p.id }); PJ.sel = null; await pjLoad(); } catch (err) { fail(err); }
       return;
     case "wt-go": {
       const opt = (k) => !!row.querySelector(`[data-opt=${k}]`)?.checked;
@@ -1514,7 +1639,6 @@ $("pj-list").addEventListener("click", async (e) => {
         const r = await post("api/project-worktree-remove", { path: w.path, force: opt("force"), delete_branch: opt("branch") });
         PJ.removing = null;
         await pjLoad();
-        // Up top: with "Can clean up" on, the project may have just left the list.
         const top = $("pj-note");
         top.className = "note";
         top.textContent = `${p.label}: removed the worktree of ${r.branch || "that folder"}${r.branch_deleted ? " and its branch" : r.branch_kept ? "; the branch stays: it has commits that are not merged" : ""}.`;
@@ -1523,17 +1647,19 @@ $("pj-list").addEventListener("click", async (e) => {
     }
   }
 });
-$("pj-list").addEventListener("submit", async (e) => {
+PJD.addEventListener("submit", async (e) => {
   const form = e.target.closest("[data-edit]");
   if (!form) return;
   e.preventDefault();
-  const f = form.elements, note = form.closest(".pj").querySelector(":scope > .note"), id = form.dataset.edit;
+  const f = form.elements, note = PJD.querySelector(":scope > .note"), id = form.dataset.edit;
   try {
     await post("api/project-edit", { id, label: f.label.value.trim(), context: f.context.value.trim(), type: f.type.value });
     PJ.editing = null;
     await pjLoad();
   } catch (err) { note.className = "note bad"; note.textContent = err.message; }
 });
+// The detail moves between the side and the list when the width crosses the breakpoint.
+narrow.addEventListener("change", () => { if (VIEW === "projects" && PJ.data) pjRender(); });
 
 // ---------------------------------------------- New project: create, clone, add a folder, from ad-hoc
 const PJ_TABS = [["create", "Create new"], ["clone", "Clone from GitHub"], ["add", "Add a folder"], ["adhoc", "From an ad-hoc folder"]];
@@ -1762,7 +1888,15 @@ document.addEventListener("keydown", (e) => {
   const typing = e.target.matches("input, textarea");
   if (e.key === "/" && !typing) { e.preventDefault(); $("q").focus(); return; }
   if (e.key === "Escape" && (typing || query || PJ.q)) { const q = $("q"); q.value = ""; q.dispatchEvent(new Event("input")); q.blur(); return; }
-  if (typing || !ST || VIEW !== "sessions") return;
+  if (typing || !ST) return;
+  if (VIEW === "projects") {
+    if (!["ArrowDown", "j", "ArrowUp", "k"].includes(e.key) || !PJ.data) return;
+    const ids = [...$("pj-list").querySelectorAll(".pj-row")].map((b) => b.dataset.id);
+    const i = ids.indexOf(PJ.sel), step = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
+    const next = ids[i < 0 ? 0 : Math.max(0, Math.min(ids.length - 1, i + step))];
+    if (next && next !== PJ.sel) { e.preventDefault(); pjSelect(next, true); }
+    return;
+  }
   if (["ArrowDown", "j", "ArrowUp", "k"].includes(e.key)) {
     const step = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
     const next = neighbor(step) ?? (selected ? null : visibleCards()[0]?.session_id);
