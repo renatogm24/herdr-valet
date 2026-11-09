@@ -135,6 +135,12 @@ command; cards and config stay.
   `relaunch [pane_id] [--mode fresh|handoff] [--prompt TEXT]`, `hook`,
   `park-all [--dry-run]`, `restore`, `recap <pane_id>`, `stats <session_id>`,
   `auto --dry-run` (what it would park), `sync [--dry-run]`, `feed [--dry-run]`, `config`.
+- `herdr-valet search <words> [--limit N] [--json]` finds a session you worked on: parked, closed,
+  resumed, open, or any Claude Code transcript, by the words in its title, summary, first message,
+  project, directory or branch (accents ignored, every word must match), best and most recent first.
+  No LLM; transcripts are indexed once and re-read only when they change (`data_dir/search/`).
+- `herdr-valet new <id[@branch]> [--model M] [--prompt TEXT] [--plugins SPEC]` is the page's New session
+  from the command line (needs the launcher commands).
 
 ## Configuration
 
