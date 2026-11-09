@@ -1662,14 +1662,10 @@ def first_message(handoff: Path, request: str, default: str) -> str:
     return CONF["relaunch_prompt"].format(handoff=handoff, request=request)
 
 
-def start_fresh(session_id: str, request: str = "", profile: str | None = None) -> dict:
-    """Start a parked session over in herdr without its history: a new Claude in the card's
-    directory, with the model it ran, whose first message points at a context file written from
-    the card and the transcript (see fresh_context), and carries `request` if there is one.
-    Nothing of the old conversation is re-cached. The card moves to history, saying where the
-    context file is. `profile` overrides the one the session ran with."""
-    if profile:
-        check_profile(profile)
+def fresh_context_file(session_id: str) -> tuple[dict, str, Path, Path]:
+    """Write a parked session's context file (data_dir/fresh/<id>.md, see fresh_context): what
+    Start fresh begins from, and what "Continue on another branch" hands to a new session.
+    Returns (card, the id the conversation lives under now, its transcript, the file)."""
     c = json.loads(card_path(session_id).read_text())
     target = current_session(session_id)
     tr = transcript_path(target)
@@ -1681,6 +1677,46 @@ def start_fresh(session_id: str, request: str = "", profile: str | None = None) 
     path = FRESH / f"{session_id}.md"
     path.write_text(fresh_context({**c, "session_id": target}, tr))
     path.chmod(0o600)
+    return c, target, tr, path
+
+
+def context_for_new(session_id: str) -> dict:
+    """The context file of a parked session and the first message that points at it, for a new
+    session somewhere else (another branch, another worktree). The card stays where it is."""
+    c, _, _, path = fresh_context_file(session_id)
+    return {"context": str(path), "prompt": first_message(path, "", "fresh_prompt"), "cwd": c.get("cwd")}
+
+
+def fork_card(session_id: str, profile: str | None = None) -> dict:
+    """A copy of a parked conversation in a new tab (fork_command: --resume --fork-session), to ask
+    it something else. The card stays parked: the copy has its own session id."""
+    if profile:
+        check_profile(profile)
+    c = json.loads(card_path(session_id).read_text())
+    target = current_session(session_id)
+    tr = transcript_path(target)
+    if not tr:
+        raise ValueError("no transcript for that session: nothing to fork")
+    if c["cwd"] and not Path(c["cwd"]).is_dir():
+        raise ValueError(f"directory no longer exists: {c['cwd']}")
+    cmd = resume_command({**c, "session_id": target, "model": requested_model(tr) or c.get("model") or ""},
+                         profile, CONF["fork_command"])
+    if not herdr_running():
+        raise HerdrDown(f"cd {shlex.quote(c['cwd'] or str(HOME))} && {cmd}")
+    ws_id = open_in_herdr(c, cmd)
+    log(f"forked parked {session_id} in {ws_id}" + (f" as {profile}" if profile else ""))
+    return {"workspace": ws_id}
+
+
+def start_fresh(session_id: str, request: str = "", profile: str | None = None) -> dict:
+    """Start a parked session over in herdr without its history: a new Claude in the card's
+    directory, with the model it ran, whose first message points at a context file written from
+    the card and the transcript (see fresh_context), and carries `request` if there is one.
+    Nothing of the old conversation is re-cached. The card moves to history, saying where the
+    context file is. `profile` overrides the one the session ran with."""
+    if profile:
+        check_profile(profile)
+    c, target, tr, path = fresh_context_file(session_id)
     values = {
         "prompt": first_message(path, request, "fresh_prompt"),
         "model": requested_model(tr) or c.get("model") or "",
