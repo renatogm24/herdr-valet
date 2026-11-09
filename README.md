@@ -66,8 +66,9 @@ herdr-valet:
 13. **Answers questions about your sessions (optional):** **Ask** on the page ("I worked on the bank
    login a while ago, didn't I?", "open a new session in exp-track to fix the timezone"). The
    model has no tools: it turns the question into searches, valet runs `search`, and the model
-   answers only from what was found. Its suggestions are buttons you press (the card, or the New
-   session panel prefilled). It only shows through Cloudflare Access: valet verifies the
+   answers only from what was found. Its suggestions are buttons you press: Resume and Fork on
+   any session it shows (one without a card opens in its repository's workspace), Restart and
+   Fork on an open one, the card itself, or the New session panel prefilled. It only shows through Cloudflare Access: valet verifies the
    `Cf-Access-Jwt-Assertion` itself (`chat_access_team`, `chat_access_aud`, `chat_access_emails`),
    so on the LAN or on 127.0.0.1 there is no chat. One question at a time, at most 10 a minute.
 

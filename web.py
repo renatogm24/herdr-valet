@@ -251,7 +251,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/project-add", "/api/project-remove"):
             self._project(url.path.rsplit("-", 1)[1])
             return
-        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context)/([^/]+)", url.path)
+        m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context|reopen)/([^/]+)", url.path)
         if not m:
             self._json(404, {"error": "not found"})
             return
@@ -285,6 +285,13 @@ class Handler(BaseHTTPRequestHandler):
                     if not profile:
                         raise ValueError("switch needs ?as=<profile>")
                     self._json(200, {"ok": True, "workspace": valet.switch(target, profile)})
+                return
+            if action == "reopen":
+                # A session without a card (from the chat): resume it, or fork it with ?fork=1.
+                if not SESSION_RE.match(target):
+                    raise ValueError("invalid session")
+                fork = bool(parse_qs(url.query).get("fork"))
+                self._json(200, {"ok": True, **valet.reopen(target, fork)})
                 return
             if not SESSION_RE.match(target) or not valet.card_path(target).exists():
                 raise ValueError("no card for that session")
