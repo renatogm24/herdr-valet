@@ -261,6 +261,7 @@
   .newsess .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .newsess .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
   .newsess .checks input { width: auto; }
+  .newsess .checks label.locked { color: var(--muted); cursor: not-allowed; }
   .newsess .ns-add { grid-column: 1 / -1; display: grid; gap: var(--u); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     border: 1px dashed var(--rule-strong); border-radius: 8px; padding: var(--u); }
   .newsess small.bad { color: var(--bad); }
@@ -691,7 +692,7 @@ async function runAll(btn, msg, path, problems) {
 // worktrees or a new branch (prepare_command creates it). "ad-hoc" is a dated scratch directory.
 const MODELS = [["opus", "Opus"], ["opusplan", "Opus Plan"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
 const ADHOC = "ad-hoc", NEW_WT = "__new__";
-let PROJECTS = [], PLUGINS = [], CAN_EDIT = false;
+let PROJECTS = [], PLUGINS = [], USER_MCPS = [], CAN_EDIT = false;
 // What the panel has chosen: context, project id, worktree path (or NEW_WT), plugins touched.
 let NS = { ctx: "", id: "", wt: "", touched: false };
 
@@ -706,6 +707,7 @@ async function loadProjects() {
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   PROJECTS = data.projects || [];
   PLUGINS = data.plugins || [];
+  USER_MCPS = data.user_mcps || [];
   CAN_EDIT = !!data.can_edit;
 }
 
@@ -848,7 +850,8 @@ function nsRender() {
 }
 
 // Plugins: the ones that are not on for every session, checked as the repo declares them, then as
-// last chosen in this folder. MCPs are the repo's (.mcp.json): shown, not chosen.
+// last chosen in this folder. MCPs are not chosen here: the repo's (.mcp.json) and your user-scope
+// ones always load, so they show checked and locked.
 function nsPluginBase() {
   const declared = (NS.ctx === ADHOC ? null : nsProject()?.plugins) || {};
   // A disabled copy of an always-on plugin from another marketplace (caveman twice) is noise.
@@ -875,13 +878,16 @@ function nsRenderPlugins() {
   const on = nsApplySpec(Object.fromEntries(ids.map((id) => [id, !!declared[id]])), nsWorktree()?.plugins || "");
   const dup = (id) => ids.filter((x) => shortPlugin(x) === shortPlugin(id)).length > 1;
   const always = PLUGINS.filter((x) => x.always).map((x) => shortPlugin(x.id));
-  const mcps = NS.ctx === ADHOC ? [] : (p?.mcps || []);
+  const repoMcps = NS.ctx === ADHOC ? [] : (p?.mcps || []);
+  const mcps = [...repoMcps.map((m) => [m, "repo"]), ...USER_MCPS.filter((m) => !repoMcps.includes(m)).map((m) => [m, "everywhere"])];
   box.innerHTML = `<span>Plugins <small>(for this folder; remembered)</small></span>
     ${ids.length ? `<div class="checks">${ids.map((id) => `<label title="${esc(id)}${id in declared ? " · the repo declares it" : ""}">
       <input type="checkbox" data-plugin="${esc(id)}" ${on[id] ? "checked" : ""}>${esc(dup(id) ? id : shortPlugin(id))}${id in declared ? " <small>repo</small>" : ""}</label>`).join("")}</div>`
       : `<small>No optional plugins installed</small>`}
     ${always.length ? `<small>Always on: ${esc(always.join(", "))}</small>` : ""}
-    <small>MCPs ${NS.ctx === ADHOC ? "— none (ad-hoc folder)" : mcps.length ? `from the repo: ${esc(mcps.join(", "))}` : "— the repo declares none"}</small>`;
+    <span>MCPs <small>(${repoMcps.length ? "the repo's .mcp.json and yours" : NS.ctx === ADHOC ? "an ad-hoc folder has only yours" : "this repo declares none; yours"}: they always load)</small></span>
+    ${mcps.length ? `<div class="checks">${mcps.map(([m, from]) => `<label class="locked" title="${from === "repo" ? "Declared in the repo's .mcp.json: change it there" : "User scope (~/.claude.json): every session"}">
+      <input type="checkbox" checked disabled>${esc(m)} <small>${from}</small></label>`).join("")}</div>` : `<small>None</small>`}`;
   box.querySelectorAll("[data-plugin]").forEach((c) => (c.onchange = () => (NS.touched = true)));
 }
 

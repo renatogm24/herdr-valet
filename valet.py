@@ -1248,6 +1248,16 @@ def installed_plugins() -> list[dict]:
     return rows
 
 
+def user_mcps() -> list[str]:
+    """The MCP servers in user scope (~/.claude.json mcpServers): every session loads them, next to
+    the ones its repo declares."""
+    try:
+        servers = json.loads((Path.home() / ".claude.json").read_text()).get("mcpServers") or {}
+    except (OSError, ValueError):
+        return []
+    return sorted(servers) if isinstance(servers, dict) else []
+
+
 # --------------------------------------------------------------------------- restart, fork, park-all
 def open_session(pane_id: str | None) -> dict:
     """The Claude session open in the pane ($HERDR_PANE_ID by default)."""

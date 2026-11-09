@@ -140,6 +140,7 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/api/projects":
             try:
                 self._json(200, {"projects": valet.projects(), "plugins": valet.installed_plugins(),
+                                 "user_mcps": valet.user_mcps(),
                                  "can_edit": bool(valet.CONF["project_command"])})
             except (ValueError, OSError) as e:
                 self._json(400, {"error": str(e)})
