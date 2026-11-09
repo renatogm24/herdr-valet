@@ -1287,7 +1287,9 @@ def project_list() -> dict:
             w["open"], w["parked"] = under(live, w["path"]), under(parked, w["path"])
     for a in adhoc:
         a["open"], a["parked"] = under(live, a["path"]), under(parked, a["path"])
-    return {"projects": projects, "adhoc": adhoc, "home": str(HOME)}
+    # The launch form lives in the Projects view too: the plugins to offer and the MCPs every session has.
+    return {"projects": projects, "adhoc": adhoc, "home": str(HOME),
+            "plugins": installed_plugins(), "user_mcps": user_mcps()}
 
 
 def project_create(name: str, context: str = "", github: str = "", no_github: bool = False,
