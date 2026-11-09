@@ -243,7 +243,7 @@
   .newsess .ns-acts .note { margin-left: 4px; }
   .newsess .note.bad { color: var(--bad); }
   .newsess .field { display: flex; flex-direction: column; gap: 6px; color: var(--muted); min-width: 0; }
-  .newsess .field[hidden], .newsess .ns-add[hidden] { display: none; }
+  .newsess .field[hidden] { display: none; }
   .newsess .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .newsess .chip { font: inherit; font-size: 0.8rem; color: var(--ink); background: var(--panel); border: 1px solid var(--rule-strong);
     border-radius: 999px; padding: 4px 12px; cursor: pointer; max-width: 100%; overflow-wrap: anywhere; text-align: left; }
@@ -252,18 +252,18 @@
   .newsess .chip[aria-pressed=true] small { color: inherit; }
   .newsess .chip.add { border-style: dashed; color: var(--muted); }
   .newsess .chip.add[aria-pressed=true] { color: var(--accent-ink); border-style: solid; }
-  .newsess .chip-wrap { display: inline-flex; align-items: center; max-width: 100%; }
-  .newsess .chip-wrap .chip { border-top-right-radius: 0; border-bottom-right-radius: 0; }
-  .newsess .chip-wrap .chip:only-child { border-radius: 999px; }
-  .newsess .chip-x { font: inherit; font-size: 0.8rem; line-height: 1; color: var(--muted); background: var(--panel); border: 1px solid var(--rule-strong);
-    border-left: 0; border-radius: 0 999px 999px 0; padding: 4px 9px 4px 7px; cursor: pointer; align-self: stretch; }
-  .newsess .chip-x:hover { color: var(--bad); border-color: var(--bad); }
+  .newsess a.chip { text-decoration: none; }
+  .newsess #ns-proj { display: flex; flex-direction: column; gap: 6px; }
+  .newsess #ns-proj input[name=find] { max-width: 320px; }
   .newsess .checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
   .newsess .checks label { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
   .newsess .checks input { width: auto; }
   .newsess .checks label.locked { color: var(--muted); cursor: not-allowed; }
-  .newsess .ns-add { grid-column: 1 / -1; display: grid; gap: var(--u); grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    border: 1px dashed var(--rule-strong); border-radius: 8px; padding: var(--u); }
+  .newsess.flat { border: 0; border-top: 1px solid var(--rule); border-radius: 0; margin: 0; background: transparent; }
+  .newsess label.inline { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); }
+  .newsess label.inline input { width: auto; }
+  .newsess .preview { color: var(--body); font-size: 0.8rem; overflow-wrap: anywhere; }
+  .newsess .preview code { color: var(--ink); }
   .newsess small.bad { color: var(--bad); }
   .note.ok { color: var(--ok); } .note.bad { color: var(--bad); }
   .cmd { display: flex; gap: var(--u); align-items: center; flex-wrap: wrap; flex-basis: 100%; }
@@ -271,6 +271,73 @@
   .detail-empty { color: var(--muted); }
   .detail-empty h1 { color: var(--ink); font-size: 1.25rem; margin-bottom: var(--u); }
   .err { color: var(--bad); font-size: 0.88rem; }
+
+  /* ------------------------------------------------------------------ views */
+  .views { display: flex; gap: 2px; background: rgb(255 255 255 / 0.08); border-radius: 7px; padding: 2px; }
+  .views a { color: inherit; text-decoration: none; font-size: 0.84rem; font-weight: 600; padding: 3px 12px; border-radius: 5px; opacity: 0.72; }
+  .views a:hover { opacity: 1; }
+  .views a[aria-current="page"] { background: rgb(255 255 255 / 0.16); opacity: 1; }
+  .page[hidden] { display: none; }
+
+  /* ------------------------------------------------------------------ projects
+     One card per project, its line color on the left like everywhere else; one row per worktree
+     with what git says about it, so cleaning up is reading the chips, not running commands. */
+  .seg { display: inline-flex; flex-wrap: wrap; gap: 2px; border: 1px solid var(--rule); border-radius: 8px; padding: 2px; margin-bottom: calc(var(--u) * 1.5); }
+  .seg button { font: inherit; font-size: 0.8rem; font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+  .seg button[aria-pressed=true] { background: var(--raised); color: var(--ink); }
+  .seg button b { color: var(--ink); margin-left: 4px; }
+  .pj-ctx { margin: calc(var(--u) * 2) 0 var(--u); }
+  .pj-grid { display: flex; flex-direction: column; gap: var(--u); }
+  .pj { background: var(--panel); border: 1px solid var(--rule); border-left: 4px solid var(--line); border-radius: 8px; min-width: 0; }
+  .pj-h { display: flex; flex-wrap: wrap; align-items: center; gap: 2px var(--u); padding: 8px 8px 8px 14px; }
+  .pj-h h3 { font-size: 0.95rem; line-height: 1.3; }
+  .pj-h .id { color: var(--muted); }
+  .pj-h .acts { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+  .pj-h .meta { flex-basis: 100%; font-size: 0.78rem; color: var(--muted); overflow-wrap: anywhere; }
+  .tag { font-size: 0.68rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    border: 1px solid var(--rule-strong); border-radius: 4px; padding: 0 5px; }
+  .pj-empty { border-top: 1px solid var(--rule); padding: 8px 14px; font-size: 0.82rem; color: var(--muted); }
+  .wts { list-style: none; border-top: 1px solid var(--rule); }
+  .wt { display: grid; grid-template-columns: minmax(110px, 240px) minmax(0, 1fr) auto auto; gap: 6px calc(var(--u) * 1.5); align-items: center;
+    padding: 6px 8px 6px 14px; font-size: 0.84rem; }
+  .wt + .wt { border-top: 1px solid var(--rule); }
+  .wt .br { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wt .ago { font-size: 0.76rem; color: var(--muted); white-space: nowrap; }
+  .wt .acts { display: flex; gap: 6px; justify-content: flex-end; }
+  .st-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+  .sc { font-size: 0.72rem; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--raised); color: var(--body); white-space: nowrap; }
+  .sc.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+  .sc.warn { background: var(--warn-soft); color: var(--warn); }
+  .sc.live { background: var(--accent-soft); color: var(--accent); }
+  .wt-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.82rem;
+    background: var(--bad-soft); border-radius: 6px; padding: 8px 10px; }
+  .wt-confirm span { flex-basis: 100%; }
+  .wt-confirm label { display: inline-flex; gap: 6px; align-items: center; }
+  .pj > .note { padding: 0 14px 8px; font-size: 0.8rem; }
+  .pj > .note:empty { display: none; }
+  .more .menu button:disabled { opacity: 0.6; cursor: default; }
+  .more .menu button:disabled:hover { background: none; }
+  /* New project: found repos and ad-hoc folders are rows to pick from, not something to type */
+  .picks { grid-column: 1 / -1; display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 8px; max-height: 300px; overflow: auto; }
+  .pick { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--u); align-items: center; padding: 6px 10px; color: var(--ink); }
+  .pick + .pick { border-top: 1px solid var(--rule); }
+  .pick b { font-weight: 600; overflow-wrap: anywhere; }
+  .pick b, .pick small { grid-column: 1; overflow-wrap: anywhere; }
+  .pick .acts, .pick .st-chips { grid-column: 2; grid-row: 1 / span 2; }
+  /* an ad-hoc folder is a radio: its button goes first */
+  .newsess label.pick { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; cursor: pointer; }
+  .newsess label.pick input { width: auto; grid-row: 1 / span 2; }
+  label.pick b, label.pick small { grid-column: 2; }
+  label.pick .st-chips { grid-column: 3; }
+  .pick.off { opacity: 0.6; }
+  .done { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; color: var(--ink); font-size: 0.86rem; }
+  .done .ok { color: var(--ok); font-weight: 700; }
+  @media (max-width: 860px) {
+    .wt { grid-template-columns: minmax(0, 1fr) auto; }
+    .wt .st-chips { grid-column: 1 / -1; grid-row: 2; }
+    .wt .acts { grid-column: 1 / -1; justify-content: flex-start; }
+    .pj-h .acts { margin-left: 0; }
+  }
 
   /* loading skeleton */
   .sk { background: linear-gradient(90deg, var(--raised), var(--rule), var(--raised)); background-size: 200% 100%; border-radius: 6px; animation: sk 1.2s ease-in-out infinite; }
@@ -300,6 +367,7 @@
       <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true"><path d="M9 4v24M23 4v9a7 7 0 0 1-7 7H9" stroke="#e4572e" stroke-width="3.5" fill="none" stroke-linecap="round"/><circle cx="9" cy="20" r="4" fill="currentColor"/></svg>
       herdr-valet <span class="who" id="who"></span>
     </div>
+    <nav class="views" aria-label="Views"><a href="#" data-view="sessions" aria-current="page">Sessions</a><a href="#projects" data-view="projects">Projects</a></nav>
     <label class="search">
       <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="2" fill="none"/><path d="M11 11l3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <input id="q" type="search" placeholder="Search parked sessions" aria-label="Search parked sessions" autocomplete="off">
@@ -310,7 +378,7 @@
   </div>
 </header>
 
-<main class="page">
+<main class="page" id="view-sessions">
   <div id="banner"></div>
 
   <section aria-labelledby="h-open">
@@ -328,6 +396,20 @@
       <div style="padding:8px 16px;display:grid;gap:12px"><div class="sk" style="height:16px;width:50%"></div><div class="sk" style="height:14px"></div><div class="sk" style="height:14px;width:80%"></div><div class="sk" style="height:14px;width:65%"></div></div>
     </nav>
     <article class="detail" id="detail" aria-live="polite"><div class="sk" style="height:22px;width:30%"></div><div class="sk" style="height:30px;width:75%"></div><div class="sk" style="height:90px"></div></article>
+  </section>
+</main>
+
+<main class="page" id="view-projects" hidden>
+  <section aria-labelledby="h-proj">
+    <div class="sect-row">
+      <h2 class="sect" id="h-proj">Projects <span class="n" id="c-proj"></span></h2>
+      <div class="acts" id="pj-acts"></div>
+      <div class="note" id="pj-note" role="status" aria-live="polite"></div>
+    </div>
+    <form class="newsess" id="pj-new" hidden aria-label="New project" autocomplete="off"></form>
+    <datalist id="pj-ctxs"></datalist>
+    <div id="pj-filter"></div>
+    <div id="pj-list"><div class="sk" style="height:90px"></div></div>
   </section>
 </main>
 
@@ -692,9 +774,10 @@ async function runAll(btn, msg, path, problems) {
 // worktrees or a new branch (prepare_command creates it). "ad-hoc" is a dated scratch directory.
 const MODELS = [["opus", "Opus"], ["opusplan", "Opus Plan"], ["sonnet", "Sonnet"], ["haiku", "Haiku"]];
 const ADHOC = "ad-hoc", NEW_WT = "__new__";
-let PROJECTS = [], PLUGINS = [], USER_MCPS = [], CAN_EDIT = false;
-// What the panel has chosen: context, project id, worktree path (or NEW_WT), plugins touched.
-let NS = { ctx: "", id: "", wt: "", touched: false };
+let PROJECTS = [], PLUGINS = [], USER_MCPS = [];
+// What the panel has chosen: context, project id, worktree path (or NEW_WT), plugins touched, and
+// what the project finder holds.
+let NS = { ctx: "", id: "", wt: "", touched: false, find: "" };
 
 const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private window */ } };
@@ -708,7 +791,6 @@ async function loadProjects() {
   PROJECTS = data.projects || [];
   PLUGINS = data.plugins || [];
   USER_MCPS = data.user_mcps || [];
-  CAN_EDIT = !!data.can_edit;
 }
 
 // Contexts in the registry's order (anku, personal, …), then ad-hoc.
@@ -726,7 +808,8 @@ function closeNewPanel() {
 }
 
 // prefill: {cwd, prompt} from a parked card ("Other branch…"): its project, a new branch, and a first
-// message that points at the card's context file.
+// message that points at the card's context file. With exact (from the Projects view), the worktree
+// at cwd itself instead of a new branch.
 async function openNewPanel(prefill = null) {
   const form = $("new-panel");
   form.hidden = false;
@@ -743,7 +826,6 @@ async function openNewPanel(prefill = null) {
   form.innerHTML = `
     <div class="field wide"><span>Where</span><div class="chips" id="ns-ctx" role="group" aria-label="Context"></div></div>
     <div class="field wide" id="ns-proj-f"><span>Project</span><div id="ns-proj"></div></div>
-    <div class="ns-add wide" id="ns-add" hidden></div>
     <div class="field wide" id="ns-where-f"><span id="ns-where-l">Worktree</span><div id="ns-where"></div></div>
     <label>Model
       <select name="model"></select>
@@ -762,12 +844,13 @@ async function openNewPanel(prefill = null) {
   form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); closeNewPanel(); } };
   form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
 
-  NS = { ctx: "", id: "", wt: "", touched: false };
+  NS = { ctx: "", id: "", wt: "", touched: false, find: "" };
   const at = (dir) => prefill?.cwd && (prefill.cwd === dir || prefill.cwd.startsWith(dir + "/"));
   const from = prefill?.cwd && (PROJECTS.find((x) => x.worktrees.some((w) => at(w.path))) || PROJECTS.find((x) => at(x.path)));
   if (from) {
     NS.ctx = from.context || "other";
-    nsPickProject(from.id, from.type === "direct" ? null : NEW_WT);
+    const same = prefill.exact && from.worktrees.find((w) => w.path === prefill.cwd && w.path !== from.path);
+    nsPickProject(from.id, from.type === "direct" ? null : (same?.path || NEW_WT));
   } else {
     const remembered = lsGet("valet-ns-ctx");
     const newest = [...PROJECTS].sort(recency)[0];
@@ -800,21 +883,20 @@ function nsRender() {
     `<button type="button" class="chip" data-ctx="${esc(c)}" aria-pressed="${c === NS.ctx}">${esc(c)}</button>`).join("");
   $("ns-ctx").querySelectorAll("[data-ctx]").forEach((b) => (b.onclick = () => nsPickContext(b.dataset.ctx)));
 
-  // Project: the context's projects, most recent first; yours can be removed. Ad-hoc: just a name.
+  // Project: the context's projects, most recent first, or what the finder matches in any context.
+  // Adding, creating and removing projects lives in the Projects view. Ad-hoc: just a name.
   $("ns-proj-f").firstElementChild.textContent = adhoc ? "Name" : "Project";
   if (adhoc) {
     $("ns-proj").innerHTML = `<input name="adhoc" maxlength="60" placeholder="optional: names the dated folder, e.g. compare-bank-apis" spellcheck="false">
-      <small>A new scratch folder, no git, in the launcher's ad-hoc directory</small>`;
+      <small>A new scratch folder, no git, in the launcher's ad-hoc directory. Later it can become a project (Projects → New project)</small>`;
   } else {
-    const ps = PROJECTS.filter((x) => (x.context || "other") === NS.ctx).sort(recency);
-    $("ns-proj").innerHTML = `<div class="chips" role="group" aria-label="Project">${ps.map((x) => `<span class="chip-wrap">
-        <button type="button" class="chip" data-proj="${esc(x.id)}" aria-pressed="${x.id === NS.id}" title="${esc(x.id)} · ${esc(x.path)}">${esc(x.label)}${x.cloned ? "" : ` <small>not cloned</small>`}</button>${
-        CAN_EDIT && x.source !== "team" ? `<button type="button" class="chip-x" data-rm="${esc(x.id)}" title="Remove ${esc(x.label)} from your projects (the folder stays)" aria-label="Remove ${esc(x.label)}">×</button>` : ""}</span>`).join("")}
-        ${CAN_EDIT ? `<button type="button" class="chip add" data-ns="add">+ Add project</button>` : ""}</div>`;
-    $("ns-proj").querySelectorAll("[data-proj]").forEach((b) => (b.onclick = () => nsPickProject(b.dataset.proj)));
-    $("ns-proj").querySelectorAll("[data-rm]").forEach((b) => (b.onclick = () => nsRemoveProject(b.dataset.rm)));
-    const add = $("ns-proj").querySelector("[data-ns=add]");
-    if (add) add.onclick = () => nsShowAdd();
+    if (!f.find) {
+      $("ns-proj").innerHTML = `<input name="find" type="search" placeholder="Find a project in any context" aria-label="Find a project" spellcheck="false" autocomplete="off">
+        <div id="ns-proj-chips"></div>`;
+      f.find.oninput = () => { NS.find = f.find.value.trim().toLowerCase(); nsRenderProjChips(); };
+      f.find.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); $("ns-proj-chips").querySelector("[data-proj]")?.click(); } };
+    }
+    nsRenderProjChips();
   }
 
   // Worktree: the project's worktrees by branch, most recent first, or a new branch.
@@ -847,6 +929,24 @@ function nsRender() {
   f.model.innerHTML = models.map(([v, l]) => `<option value="${esc(v)}" ${v === want ? "selected" : ""}>${esc(l)}</option>`).join("");
 
   nsRenderPlugins();
+}
+
+function nsRenderProjChips() {
+  const q = NS.find;
+  const ps = q ? PROJECTS.filter((x) => [x.id, x.label, x.path, x.context].join(" ").toLowerCase().includes(q)).sort(recency)
+               : PROJECTS.filter((x) => (x.context || "other") === NS.ctx).sort(recency);
+  const box = $("ns-proj-chips");
+  box.innerHTML = `<div class="chips" role="group" aria-label="Project">${ps.map((x) =>
+      `<button type="button" class="chip" data-proj="${esc(x.id)}" aria-pressed="${x.id === NS.id}" title="${esc(x.id)} · ${esc(x.path)}">${esc(x.label)}${
+        q && (x.context || "other") !== NS.ctx ? ` <small>${esc(x.context)}</small>` : ""}${x.cloned ? "" : ` <small>not cloned</small>`}</button>`).join("")
+      || `<small>No project matches “${esc(q)}”</small>`}
+    <a class="chip add" href="#projects" title="Create, clone or add projects, and clean up worktrees">Manage projects</a></div>`;
+  box.querySelectorAll("[data-proj]").forEach((b) => (b.onclick = () => {
+    const p = PROJECTS.find((x) => x.id === b.dataset.proj);
+    if (NS.find) { NS.find = ""; $("new-panel").elements.find.value = ""; }
+    if (p && (p.context || "other") !== NS.ctx) { NS.ctx = p.context || "other"; lsSet("valet-ns-ctx", NS.ctx); }
+    nsPickProject(b.dataset.proj);
+  }));
 }
 
 // Plugins: the ones that are not on for every session, checked as the repo declares them, then as
@@ -935,61 +1035,6 @@ async function nsStart() {
   } catch (err) {
     busy = false; go.disabled = false;
     bad(err.message);
-  }
-}
-
-// Your own projects (the launcher's personal overlay): add an existing clone, or take one out.
-function nsShowAdd() {
-  const box = $("ns-add"), ctxs = nsContexts().filter((c) => c !== ADHOC);
-  box.hidden = false;
-  box.innerHTML = `
-    <label class="wide">Folder <small>(an existing clone)</small><input name="ap_path" placeholder="~/code/personal/my-repo" spellcheck="false"></label>
-    <label>Name <small>(optional)</small><input name="ap_label" placeholder="from the folder"></label>
-    <label>Id <small>(optional)</small><input name="ap_id" placeholder="from the folder" spellcheck="false"></label>
-    <label>Context<input name="ap_ctx" list="ns-ctxs" value="${esc(NS.ctx === ADHOC ? "personal" : NS.ctx)}" spellcheck="false"></label>
-    <datalist id="ns-ctxs">${ctxs.map((c) => `<option value="${esc(c)}">`).join("")}</datalist>
-    <label>Type<select name="ap_type"><option value="single">A worktree per branch</option><option value="direct">One folder, its own branch</option></select></label>
-    <div class="ns-acts wide">
-      <button class="btn small primary" type="button" data-ap="go">Add project</button>
-      <button class="btn small" type="button" data-ap="cancel">Cancel</button>
-      <span class="note" id="ap-note" role="status" aria-live="polite"></span>
-    </div>`;
-  const f = $("new-panel").elements;
-  box.querySelector("[data-ap=cancel]").onclick = () => { box.hidden = true; box.innerHTML = ""; };
-  box.querySelector("[data-ap=go]").onclick = nsAddProject;
-  box.querySelectorAll("input").forEach((i) => (i.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); nsAddProject(); } }));
-  f.ap_path.focus();
-}
-
-async function nsAddProject() {
-  const f = $("new-panel").elements, note = $("ap-note");
-  if (!f.ap_path.value.trim()) { note.className = "note bad"; note.textContent = "Which folder?"; f.ap_path.focus(); return; }
-  note.className = "note"; note.textContent = "Adding…";
-  try {
-    const r = await post("api/project-add", { path: f.ap_path.value.trim(), label: f.ap_label.value.trim(),
-      id: f.ap_id.value.trim(), context: f.ap_ctx.value.trim(), type: f.ap_type.value });
-    await loadProjects();
-    $("ns-add").hidden = true; $("ns-add").innerHTML = "";
-    const added = PROJECTS.find((x) => x.id === r.id);
-    NS.ctx = added?.context || NS.ctx;
-    nsPickProject(r.id);
-    $("ns-note").className = "note ok"; $("ns-note").textContent = `Added ${r.id}`;
-  } catch (e) {
-    note.className = "note bad"; note.textContent = e.message;
-  }
-}
-
-async function nsRemoveProject(id) {
-  const p = PROJECTS.find((x) => x.id === id);
-  if (!confirm(`Remove ${p?.label || id} from your projects?\n\nIt only leaves the list: ${p?.path || "the folder"} and its worktrees stay.`)) return;
-  const note = $("ns-note");
-  try {
-    await post("api/project-remove", { id });
-    await loadProjects();
-    nsPickContext(nsContexts().includes(NS.ctx) ? NS.ctx : (PROJECTS[0]?.context || ADHOC));
-    note.className = "note ok"; note.textContent = `Removed ${id} from the list`;
-  } catch (e) {
-    note.className = "note bad"; note.textContent = e.message;
   }
 }
 
@@ -1250,6 +1295,425 @@ function keepSelection() {
   if (!vis.some((c) => c.session_id === selected)) selected = narrow.matches ? null : vis[0]?.session_id ?? null;
 }
 
+// ------------------------------------------------------------------ projects view
+// The launcher's registry (project_command: `code project …`) with each worktree's git status:
+// create, clone or add projects and clean up worktrees without a terminal. Team projects are
+// read-only here; they change by PR to the launcher's config/projects.conf.
+let VIEW = "sessions";
+let PJ = { data: null, err: "", loading: false, filter: "all", q: "", panel: null, scan: null, editing: null, removing: null, adhoc: null, done: null };
+const KINDS = [["single", "A worktree per branch"], ["direct", "One folder, works on its branch"]];
+const kindOptions = (sel) => KINDS.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
+const tilde = (p) => (PJ.data?.home && p && (p === PJ.data.home || p.startsWith(PJ.data.home + "/")) ? "~" + p.slice(PJ.data.home.length) : p || "");
+const fromTs = (ts) => (ts ? new Date(ts * 1000).toISOString() : null);
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+function showView() {
+  VIEW = location.hash === "#projects" ? "projects" : "sessions";
+  $("view-sessions").hidden = VIEW !== "sessions";
+  $("view-projects").hidden = VIEW !== "projects";
+  document.querySelectorAll(".views a").forEach((a) =>
+    a.dataset.view === VIEW ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+  const q = $("q");
+  q.placeholder = VIEW === "projects" ? "Search projects and branches" : "Search parked sessions";
+  q.setAttribute("aria-label", q.placeholder);
+  q.value = VIEW === "projects" ? PJ.q : query;
+  if (VIEW === "projects") { if (!$("new-panel").hidden) closeNewPanel(); pjLoad(); }
+  else if (ST) load();
+}
+
+async function pjLoad() {
+  if (PJ.loading) return;
+  PJ.loading = true;
+  try {
+    const r = await fetch("api/project-list", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    PJ.data = d; PJ.err = "";
+  } catch (e) {
+    PJ.err = e.message;
+  }
+  PJ.loading = false;
+  pjRender();
+}
+
+function pjContexts() {
+  const seen = [];
+  for (const p of PJ.data?.projects || []) if (p.context && !seen.includes(p.context)) seen.push(p.context);
+  if (!seen.includes("personal")) seen.push("personal");
+  return seen;
+}
+// The GitHub owner most projects of a context use: where a new one of that context goes.
+function pjOwner(ctx) {
+  const n = {};
+  for (const p of PJ.data?.projects || []) if (p.context === ctx && p.owner) n[p.owner] = (n[p.owner] || 0) + 1;
+  return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
+}
+
+// What a worktree's git status means, as chips; removable: a worktree of its own (never the main
+// clone); safe: removing it loses nothing (clean, pushed, its work merged or none of its own).
+function wtInfo(p, w) {
+  const s = w.status || {}, main = w.path === p.path, chips = [];
+  if (s.dirty) chips.push(["warn", `${s.dirty} uncommitted`, "Files with changes not committed"]);
+  if (s.unpushed) chips.push(["warn", `${s.unpushed} unpushed`, "Commits not on its remote branch"]);
+  if (!main && s.merged) chips.push(["ok", "merged", `Its changes are already in ${p.base}`]);
+  else if (!main && s.ahead === 0) chips.push(["", "no commits of its own", `Nothing that is not in ${p.base}`]);
+  else if (!main && s.ahead > 0) chips.push(["", `${s.ahead} ahead`, `Commits not in ${p.base}`]);
+  if (!main && s.upstream === "gone" && !s.merged) chips.push(["", "remote branch deleted", "Its branch on origin is gone (deleted after a merge, or by hand)"]);
+  if (w.open) chips.push(["live", `${w.open} open`, "Claude sessions running here"]);
+  if (w.parked) chips.push(["", `${w.parked} parked`, "Parked cards in this folder"]);
+  const removable = !main && p.type === "single";
+  const safe = removable && !s.dirty && !s.unpushed && (s.merged || s.ahead === 0) && !w.open;
+  return { chips, removable, safe };
+}
+
+function pjRender() {
+  const acts = $("pj-acts"), list = $("pj-list");
+  acts.innerHTML = PJ.data ? `<button class="btn small primary" type="button" data-pj="new" aria-expanded="${!!PJ.panel}">New project</button>
+    <button class="btn small" type="button" data-pj="fetch" title="git fetch --prune in every project, so merged branches and deleted remotes show up">Fetch all</button>` : "";
+  acts.querySelector("[data-pj=new]")?.addEventListener("click", () => (PJ.panel ? pjClosePanel() : pjOpenPanel("create")));
+  acts.querySelector("[data-pj=fetch]")?.addEventListener("click", (e) => pjFetch([], e.currentTarget));
+  if (PJ.err) { list.innerHTML = `<p class="err">Could not list projects: ${esc(PJ.err)}</p>`; $("pj-filter").innerHTML = ""; return; }
+  if (!PJ.data) return;
+  $("pj-ctxs").innerHTML = pjContexts().map((c) => `<option value="${esc(c)}">`).join("");
+  const all = PJ.data.projects;
+  const infos = new Map(all.map((p) => [p.id, p.worktrees.map((w) => wtInfo(p, w))]));
+  const nSafe = [...infos.values()].flat().filter((i) => i.safe).length;
+  const unsaved = (p) => p.worktrees.some((w) => w.status?.dirty || w.status?.unpushed);
+  const nUnsaved = all.filter(unsaved).length;
+  $("c-proj").textContent = all.length;
+  $("pj-filter").innerHTML = `<div class="seg" role="group" aria-label="Show">
+    <button type="button" data-f="all" aria-pressed="${PJ.filter === "all"}">All<b>${all.length}</b></button>
+    <button type="button" data-f="clean" aria-pressed="${PJ.filter === "clean"}" title="Worktrees you can remove without losing anything">Can clean up<b>${nSafe}</b></button>
+    <button type="button" data-f="unsaved" aria-pressed="${PJ.filter === "unsaved"}" title="Projects with uncommitted or unpushed work">Unsaved work<b>${nUnsaved}</b></button></div>`;
+  $("pj-filter").querySelectorAll("[data-f]").forEach((b) => (b.onclick = () => { PJ.filter = b.dataset.f; pjRender(); }));
+
+  const words = PJ.q.split(/\s+/).filter(Boolean);
+  const hit = (p) => !words.length || words.every((w) => [p.id, p.label, p.path, p.context, p.owner, ...p.worktrees.map((x) => x.branch)].join(" ").toLowerCase().includes(w));
+  const keep = (p) => hit(p) && (PJ.filter === "all" || (PJ.filter === "clean" ? infos.get(p.id).some((i) => i.safe) : unsaved(p)));
+  const groups = pjContexts().map((c) => [c, all.filter((p) => p.context === c && keep(p)).sort(recency)]).filter(([, ps]) => ps.length);
+  list.innerHTML = groups.map(([c, ps]) => `<h3 class="sect pj-ctx">${esc(c)} <span class="n">${ps.length}</span></h3>
+    <div class="pj-grid">${ps.map((p) => pjCard(p, infos.get(p.id))).join("")}</div>`).join("")
+    || `<p class="empty-line">${words.length ? "No project matches." : PJ.filter === "clean" ? "Nothing to clean up: every worktree has work of its own." : PJ.filter === "unsaved" ? "No uncommitted or unpushed work anywhere." : "No projects yet: New project creates, clones or adds one."}</p>`;
+}
+
+function pjCard(p, infos) {
+  const team = p.source === "team";
+  let rows = p.worktrees.map((w, i) => [w, infos[i]]);
+  if (PJ.filter === "clean") rows = rows.filter(([, i]) => i.safe);
+  if (PJ.filter === "unsaved") rows = rows.filter(([w]) => w.status?.dirty || w.status?.unpushed);
+  const kind = p.type === "direct" ? "one folder" : p.type === "single" ? "a worktree per branch" : p.type;
+  const meta = [kind, tilde(p.path), p.owner ? `github.com/${p.owner}` : "no GitHub owner", p.base ? `base ${p.base}` : ""].filter(Boolean).join(" · ");
+  const body = !p.cloned ? `<p class="pj-empty">Not cloned yet: run <code>code</code> once in a terminal to clone it</p>`
+    : rows.length ? `<ul class="wts">${rows.map(([w, i]) => wtRow(p, w, i)).join("")}</ul>`
+    : p.type === "single" && !p.worktrees.length ? `<p class="pj-empty">No worktrees yet: New session creates one for a branch</p>` : "";
+  return `<article class="pj" style="--line:${lineColor(p.id)}" data-id="${esc(p.id)}">
+    <header class="pj-h">
+      <h3>${esc(p.label)}</h3><code class="id">${esc(p.id)}</code>${team ? ` <span class="tag" title="From the team registry: it changes by PR to the launcher's config/projects.conf">team</span>` : ""}
+      <div class="acts">
+        <button class="btn small" type="button" data-pa="session" ${p.cloned ? "" : "disabled"} title="Start Claude here${p.type === "single" ? " on a new branch" : ""}">New session</button>
+        <details class="more"><summary class="btn small" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
+          <button type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"}>Fetch<small>git fetch --prune: updates merged and deleted branches</small></button>
+          ${team ? `<button type="button" disabled>Team project<small>Change it by PR to config/projects.conf</small></button>`
+            : `<button type="button" data-pa="edit">Edit<small>Name, context, kind</small></button><hr>
+               <button type="button" data-pa="forget">Remove from the list<small>The folder and its worktrees stay</small></button>`}
+        </div></details>
+      </div>
+      <p class="meta">${esc(meta)}</p>
+    </header>
+    ${PJ.editing === p.id ? pjEditForm(p) : ""}
+    ${body}
+    <p class="note" role="status" aria-live="polite"></p>
+  </article>`;
+}
+
+function wtRow(p, w, i) {
+  const can = w.branch && w.branch !== "(detached)";
+  return `<li class="wt" data-path="${esc(w.path)}">
+    <span class="br" title="${esc(tilde(w.path))}">${esc(w.branch || "(no branch)")}</span>
+    <span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>
+    <span class="ago" title="Last session here">${w.last_accessed ? short(fromTs(w.last_accessed)) : ""}</span>
+    <span class="acts">
+      <button class="btn small" type="button" data-pa="wt-session" ${can || p.type === "direct" ? "" : "disabled"}>Session</button>
+      ${i.removable ? `<button class="btn small danger" type="button" data-pa="wt-remove" aria-expanded="${PJ.removing === w.path}">Remove</button>` : ""}
+    </span>
+    ${PJ.removing === w.path ? wtConfirm(p, w) : ""}
+  </li>`;
+}
+
+function wtConfirm(p, w) {
+  const s = w.status || {};
+  const lose = [s.dirty ? `${s.dirty} files with uncommitted changes` : "", s.unpushed ? `${s.unpushed} unpushed commits` : "",
+    !s.merged && s.ahead > 0 ? `the branch stays: ${s.ahead} commits not in ${p.base}` : ""].filter(Boolean);
+  const why = w.open ? "A Claude session is open here: park or close it first."
+    : lose.length ? `<b>Careful:</b> ${esc(lose.join("; "))}.`
+    : `Nothing is lost: ${s.merged ? `its changes are in ${esc(p.base)}` : "it has no commits of its own"}.`;
+  return `<div class="wt-confirm" role="group" aria-label="Remove the worktree of ${esc(w.branch || "")}">
+    <span>Removes <code>${esc(tilde(w.path))}</code>. ${why}${w.parked ? ` Its ${w.parked} parked card${w.parked > 1 ? "s" : ""} would no longer resume.` : ""}</span>
+    ${w.branch ? `<label><input type="checkbox" data-opt="branch" ${s.merged || s.ahead === 0 ? "checked" : ""}> Delete the branch too <small>(only if merged)</small></label>` : ""}
+    ${s.dirty ? `<label><input type="checkbox" data-opt="force"> Discard the uncommitted changes</label>` : ""}
+    <button class="btn small danger armed" type="button" data-pa="wt-go" ${w.open ? "disabled" : ""}>Remove worktree</button>
+    <button class="btn small" type="button" data-pa="wt-cancel">Cancel</button>
+  </div>`;
+}
+
+function pjEditForm(p) {
+  return `<form class="newsess flat" data-edit="${esc(p.id)}" autocomplete="off">
+    <label>Name<input name="label" value="${esc(p.label)}" required></label>
+    <label>Context<input name="context" list="pj-ctxs" value="${esc(p.context)}" spellcheck="false" required></label>
+    <label>Kind<select name="type">${kindOptions(p.type)}</select></label>
+    <div class="ns-acts wide"><button class="btn small primary" type="submit">Save</button>
+      <button class="btn small" type="button" data-pa="edit-cancel">Cancel</button></div>
+  </form>`;
+}
+
+// Leaves the Projects view for a new session at cwd (exact: that worktree, not a new branch).
+function pjStartSession(cwd, exact) {
+  location.hash = "";
+  setTimeout(() => openNewPanel({ cwd, exact }), 0);
+}
+
+async function pjFetch(ids, btn) {
+  const note = $("pj-note");
+  btn.disabled = true; note.className = "note"; note.textContent = ids.length ? `Fetching ${ids.join(", ")}…` : "Fetching every project… ~10 s";
+  try {
+    const r = await post("api/project-fetch", { ids });
+    note.className = r.failed.length ? "note bad" : "note";
+    note.textContent = `Fetched ${r.fetched.length}${r.failed.length ? `; no fetch for ${r.failed.join(", ")} (no origin, or no access)` : ""}.`;
+    await pjLoad();
+  } catch (e) {
+    note.className = "note bad"; note.textContent = e.message;
+  }
+  btn.disabled = false;
+}
+
+$("pj-list").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-pa]");
+  if (!b) return;
+  const card = b.closest(".pj"), p = PJ.data.projects.find((x) => x.id === card.dataset.id);
+  const row = b.closest(".wt"), w = row && p.worktrees.find((x) => x.path === row.dataset.path);
+  const note = card.querySelector(":scope > .note");
+  const fail = (err) => { note.className = "note bad"; note.textContent = err.message; b.disabled = false; };
+  b.closest("details.more")?.removeAttribute("open");
+  switch (b.dataset.pa) {
+    case "session": return pjStartSession(p.path, false);
+    case "wt-session": return pjStartSession(w.path, true);
+    case "fetch": return pjFetch([p.id], b);
+    case "edit": PJ.editing = PJ.editing === p.id ? null : p.id; pjRender(); return document.querySelector(`[data-edit="${CSS.escape(p.id)}"] input`)?.focus();
+    case "edit-cancel": PJ.editing = null; return pjRender();
+    case "wt-remove": PJ.removing = PJ.removing === w.path ? null : w.path; return pjRender();
+    case "wt-cancel": PJ.removing = null; return pjRender();
+    case "forget":
+      if (!arm(b, `Remove ${p.label}? Click again`, note, `It only leaves the list: ${tilde(p.path)} and its worktrees stay.`)) return;
+      try { await post("api/project-remove", { id: p.id }); await pjLoad(); } catch (err) { fail(err); }
+      return;
+    case "wt-go": {
+      const opt = (k) => !!row.querySelector(`[data-opt=${k}]`)?.checked;
+      if (w.status?.dirty && !opt("force")) { note.className = "note bad"; note.textContent = "It has uncommitted changes: tick “Discard” to remove it anyway."; return; }
+      b.disabled = true; note.className = "note"; note.textContent = `Removing ${tilde(w.path)}…`;
+      try {
+        const r = await post("api/project-worktree-remove", { path: w.path, force: opt("force"), delete_branch: opt("branch") });
+        PJ.removing = null;
+        await pjLoad();
+        // Up top: with "Can clean up" on, the project may have just left the list.
+        const top = $("pj-note");
+        top.className = "note";
+        top.textContent = `${p.label}: removed the worktree of ${r.branch || "that folder"}${r.branch_deleted ? " and its branch" : r.branch_kept ? "; the branch stays: it has commits that are not merged" : ""}.`;
+      } catch (err) { fail(err); }
+      return;
+    }
+  }
+});
+$("pj-list").addEventListener("submit", async (e) => {
+  const form = e.target.closest("[data-edit]");
+  if (!form) return;
+  e.preventDefault();
+  const f = form.elements, note = form.closest(".pj").querySelector(":scope > .note"), id = form.dataset.edit;
+  try {
+    await post("api/project-edit", { id, label: f.label.value.trim(), context: f.context.value.trim(), type: f.type.value });
+    PJ.editing = null;
+    await pjLoad();
+  } catch (err) { note.className = "note bad"; note.textContent = err.message; }
+});
+
+// ---------------------------------------------- New project: create, clone, add a folder, from ad-hoc
+const PJ_TABS = [["create", "Create new"], ["clone", "Clone from GitHub"], ["add", "Add a folder"], ["adhoc", "From an ad-hoc folder"]];
+
+function pjClosePanel() { PJ.panel = null; PJ.done = null; pjRenderPanel(); pjRender(); }
+function pjOpenPanel(tab) { PJ.panel = tab; PJ.done = null; pjRenderPanel(); pjRender(); $("pj-new").querySelector("input:not([type=checkbox]):not([type=radio])")?.focus(); }
+
+// Context, kind and the GitHub row: the same in Create and From ad-hoc.
+function pjCommonFields(withGithub) {
+  const ctx = lsGet("valet-pj-ctx") || "personal";
+  return `<label>Context<input name="context" list="pj-ctxs" value="${esc(ctx)}" spellcheck="false" required></label>
+    <label>Kind<select name="type">${kindOptions("single")}</select></label>
+    ${withGithub ? `<div class="field wide"><span>GitHub</span><div class="ns-acts">
+      <label class="inline"><input type="checkbox" name="gh" checked> Create a repo in</label>
+      <input name="owner" value="${esc(pjOwner(ctx))}" aria-label="GitHub owner" placeholder="owner" spellcheck="false" style="width:16ch">
+      <select name="vis" aria-label="Visibility" style="width:auto"><option value="private">private</option><option value="public">public</option></select>
+    </div></div>` : ""}`;
+}
+
+function pjRenderPanel() {
+  const form = $("pj-new");
+  form.hidden = !PJ.panel;
+  if (!PJ.panel) { form.innerHTML = ""; return; }
+  const tab = PJ.panel, adhoc = PJ.data?.adhoc || [];
+  const tabs = `<div class="field wide"><div class="chips" role="group" aria-label="How">${PJ_TABS.map(([k, l]) =>
+    `<button type="button" class="chip" data-tab="${k}" aria-pressed="${k === tab}">${l}${k === "adhoc" && adhoc.length ? ` <small>${adhoc.length}</small>` : ""}</button>`).join("")}</div></div>`;
+  let body = "", submit = "";
+  if (tab === "create") {
+    body = `<label>Name<input name="name" placeholder="e.g. bank-reader: the folder and the repo" spellcheck="false" required></label>
+      ${pjCommonFields(true)}
+      <details class="wide"><summary>Display name, folder</summary>
+        <label>Display name<input name="label" placeholder="the name"></label>
+        <label>Folder<input name="path" placeholder="~/code/<context>/<name>" spellcheck="false"></label></details>`;
+    submit = "Create project";
+  } else if (tab === "clone") {
+    body = `<label class="wide">Repository<input name="repo" placeholder="owner/repo, or a git URL" spellcheck="false" required></label>
+      ${pjCommonFields(false)}
+      <details class="wide"><summary>Display name, id, folder</summary>
+        <label>Display name<input name="label" placeholder="the repo's name"></label>
+        <label>Id<input name="id" placeholder="from the repo" spellcheck="false"></label>
+        <label>Folder<input name="path" placeholder="~/code/<context>/<repo>" spellcheck="false"></label></details>`;
+    submit = "Clone";
+  } else if (tab === "add") {
+    const scan = PJ.scan;
+    body = `<div class="field wide"><span>Repos on this machine that are not in the list <small>(~/code and the team's repo folder)</small></span>
+        ${scan === null ? `<small>Looking…</small>` : scan.error ? `<small class="bad">${esc(scan.error)}</small>`
+          : !scan.repos.length ? `<small>None: every repo found is already a project.</small>`
+          : `<div class="picks">${scan.repos.map((x) => `<div class="pick" data-path="${esc(x.path)}">
+              <b>${esc(x.name)}</b><small>${esc(tilde(x.path))}${x.owner ? ` · github.com/${esc(x.owner)}` : x.remote ? "" : " · no remote"}${x.last_commit ? ` · last commit ${ago(fromTs(x.last_commit))}` : ""}</small>
+              <span class="acts"><button class="btn small" type="button" data-add="${esc(x.path)}">Add to ${esc(x.context)}</button></span></div>`).join("")}</div>`}</div>
+      <label class="wide">Or a folder <small>(an existing clone)</small><input name="path" placeholder="~/code/personal/my-repo" spellcheck="false"></label>
+      ${pjCommonFields(false)}`;
+    submit = "Add folder";
+  } else {
+    const sel = adhoc.find((a) => a.path === PJ.adhoc);
+    body = `<div class="field wide"><span>Ad-hoc folders, newest first <small>(git init there, moved to ~/code/&lt;context&gt;/&lt;name&gt;; its conversations and parked cards move with it)</small></span>
+        ${adhoc.length ? `<div class="picks" role="radiogroup">${adhoc.slice(0, 30).map((a) => `<label class="pick${a.open ? " off" : ""}">
+            <input type="radio" name="pick" value="${esc(a.path)}" ${a.path === PJ.adhoc ? "checked" : ""}>
+            <b>${esc(a.name)}</b><small>${a.files} file${a.files === 1 ? "" : "s"}${a.last_accessed ? ` · ${ago(fromTs(a.last_accessed))}` : ""}</small>
+            <span class="st-chips">${a.open ? `<span class="sc live">${a.open} open</span>` : ""}${a.parked ? `<span class="sc">${a.parked} parked</span>` : ""}</span></label>`).join("")}</div>`
+          : `<small>No ad-hoc folders.</small>`}</div>
+      ${sel ? `<label>Name<input name="name" value="${esc(sel.name.replace(/^\d{4}-\d{2}-\d{2}-?/, "") || "")}" spellcheck="false" required></label>
+        ${pjCommonFields(true)}` : ""}`;
+    submit = "Make it a project";
+  }
+  // Done: just what happened and where to go next; "Another one" brings the form back.
+  form.innerHTML = PJ.done ? `<div class="done" role="status"><span class="ok">✓</span> ${PJ.done.html}</div>
+    <div class="ns-acts wide"><button class="btn small primary" type="button" data-pn="go">Start a session</button>
+      <button class="btn small" type="button" data-pn="again">Another one</button>
+      <button class="btn small" type="button" data-pn="cancel">Close</button></div>`
+    : `${tabs}${body}<p class="preview wide" id="pn-preview"></p>
+    <div class="ns-acts wide"><button class="btn small primary" type="submit" ${tab === "adhoc" && !PJ.adhoc ? "disabled" : ""}>${submit}</button>
+      <button class="btn small" type="button" data-pn="cancel">Cancel</button>
+      <span class="note" id="pn-note" role="status" aria-live="polite"></span></div>`;
+  const f = form.elements;
+  form.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.panel = b.dataset.tab; PJ.done = null; pjRenderPanel(); }));
+  form.querySelector("[data-pn=cancel]").onclick = pjClosePanel;
+  form.querySelector("[data-pn=go]")?.addEventListener("click", () => pjStartSession(PJ.done.path, false));
+  form.querySelector("[data-pn=again]")?.addEventListener("click", () => pjOpenPanel(PJ.panel));
+  if (PJ.done) { form.querySelector("[data-pn=go]").focus(); return; }
+  form.querySelectorAll("[data-add]").forEach((b) => (b.onclick = () => pjSubmit(b)));
+  form.querySelectorAll("[name=pick]").forEach((r) => (r.onchange = () => { PJ.adhoc = r.value; pjRenderPanel(); }));
+  if (f.context) f.context.oninput = () => {
+    lsSet("valet-pj-ctx", f.context.value.trim());
+    if (f.owner && !f.owner.dataset.touched) f.owner.value = pjOwner(f.context.value.trim());
+    pjPreview();
+  };
+  if (f.owner) f.owner.oninput = () => { f.owner.dataset.touched = "1"; pjPreview(); };
+  if (f.gh) f.gh.onchange = () => { f.owner.disabled = f.vis.disabled = !f.gh.checked; pjPreview(); };
+  form.oninput = pjPreview;
+  form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); pjClosePanel(); } };
+  form.onsubmit = (e) => { e.preventDefault(); pjSubmit(null); };
+  if (tab === "add" && PJ.scan === null) pjScan();
+  pjPreview();
+}
+
+async function pjScan() {
+  try {
+    const r = await fetch("api/project-scan", { cache: "no-store" });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    PJ.scan = { repos: d.repos };
+  } catch (e) { PJ.scan = { repos: [], error: e.message }; }
+  if (PJ.panel === "add") pjRenderPanel();
+}
+
+// What the form is about to do, in one line, as it is filled in.
+function pjPreview() {
+  const form = $("pj-new"), f = form.elements, out = $("pn-preview");
+  if (!out) return;
+  const ctx = f.context?.value.trim() || "personal", gh = f.gh?.checked, owner = f.owner?.value.trim();
+  const dir = (name) => f.path?.value.trim() || `~/code/${ctx}/${name || "<name>"}`;
+  const repo = (name) => gh ? (owner ? `, then <code>github.com/${esc(owner)}/${esc(name || "<name>")}</code> (${f.vis.value})` : `; <b>a GitHub owner is missing</b>`) : ", only local (no GitHub)";
+  let html = "";
+  if (PJ.panel === "create") {
+    const name = f.name.value.trim();
+    html = `Creates <code>${esc(dir(name))}</code> with git and a first commit${repo(name)}.`;
+  } else if (PJ.panel === "clone") {
+    const r = f.repo.value.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+    const name = r.split(/[/:]/).pop();
+    html = r ? `Clones into <code>${esc(dir(name))}</code>.` : "";
+  } else if (PJ.panel === "adhoc" && f.name) {
+    const name = f.name.value.trim();
+    html = `Moves the folder to <code>${esc(`~/code/${ctx}/${name || "<name>"}`)}</code>, runs git init and commits what it has${repo(name)}.`;
+  }
+  out.innerHTML = html;
+  out.hidden = !html;
+}
+
+async function pjSubmit(addBtn) {
+  const form = $("pj-new"), f = form.elements, note = $("pn-note"), go = form.querySelector("[type=submit]");
+  const bad = (msg, el) => { note.className = "note bad"; note.textContent = msg; el?.focus(); };
+  const ctx = f.context?.value.trim() || "personal", type = f.type?.value || "single";
+  const gh = { github: f.owner?.value.trim() || "", no_github: f.gh ? !f.gh.checked : true, public: f.vis?.value === "public" };
+  let path, body, msg;
+  if (addBtn) {
+    const x = PJ.scan.repos.find((r) => r.path === addBtn.dataset.add);
+    path = "api/project-add"; body = { path: x.path, id: x.id, context: x.context, type: "single" }; msg = `Adding ${x.name}…`;
+  } else if (PJ.panel === "create") {
+    const name = f.name.value.trim();
+    if (!NAME_RE.test(name)) return bad("The name is letters, digits, . _ and - (it is the folder and the repo)", f.name);
+    if (!gh.no_github && !gh.github) return bad("Type the GitHub owner, or untick “Create a repo”", f.owner);
+    path = "api/project-create"; body = { name, context: ctx, type, label: f.label.value.trim(), path: f.path.value.trim(), ...gh };
+    msg = gh.no_github ? "Creating…" : "Creating the folder and the GitHub repo…";
+  } else if (PJ.panel === "clone") {
+    const repo = f.repo.value.trim();
+    if (!repo) return bad("Type owner/repo or a git URL", f.repo);
+    path = "api/project-clone"; body = { repo, context: ctx, type, label: f.label.value.trim(), id: f.id.value.trim(), path: f.path.value.trim() };
+    msg = "Cloning…";
+  } else if (PJ.panel === "add") {
+    if (!f.path.value.trim()) return bad("Pick a repo above, or type a folder", f.path);
+    path = "api/project-add"; body = { path: f.path.value.trim(), context: ctx, type }; msg = "Adding…";
+  } else {
+    const a = (PJ.data.adhoc || []).find((x) => x.path === PJ.adhoc);
+    if (!a) return bad("Pick an ad-hoc folder");
+    if (a.open) return bad("A Claude session is open in that folder: park it first (its card moves with it)");
+    const name = f.name.value.trim();
+    if (!NAME_RE.test(name)) return bad("The name is letters, digits, . _ and - (it is the folder and the repo)", f.name);
+    if (!gh.no_github && !gh.github) return bad("Type the GitHub owner, or untick “Create a repo”", f.owner);
+    path = "api/project-promote"; body = { path: a.path, name, context: ctx, type, ...gh }; msg = "Moving the folder and creating the project…";
+  }
+  go.disabled = true; if (addBtn) addBtn.disabled = true;
+  note.className = "note"; note.textContent = msg;
+  try {
+    const r = await post(path, body);
+    PJ.done = { path: r.path, html: `<b>${esc(r.id)}</b> is a project, in <code>${esc(tilde(r.path))}</code>${
+      r.github ? ` · <a href="${esc(r.github)}" target="_blank" rel="noopener">${esc(r.github.replace("https://", ""))}</a>` : ""}${
+      r.conversations_moved ? ` · ${r.conversations_moved} conversation${r.conversations_moved > 1 ? "s" : ""} moved` : ""}${
+      r.warning ? ` <span class="note bad">${esc(r.warning)}</span>` : ""}` };
+    PJ.scan = null; PJ.adhoc = null;
+    await pjLoad();
+    pjRenderPanel();
+  } catch (err) {
+    go.disabled = false; if (addBtn) addBtn.disabled = false;
+    bad(err.message);
+  }
+}
+
+window.addEventListener("hashchange", showView);
+
 // ------------------------------------------------------------------ load
 async function load() {
   if (busy || relaunching) return;
@@ -1287,6 +1751,7 @@ document.addEventListener("keydown", (e) => {
 }, true);
 
 $("q").addEventListener("input", (e) => {
+  if (VIEW === "projects") { PJ.q = e.target.value.trim().toLowerCase(); pjRender(); return; }
   query = e.target.value.trim().toLowerCase();
   keepSelection();
   renderMap(); renderDetail();
@@ -1296,8 +1761,8 @@ $("q").addEventListener("input", (e) => {
 document.addEventListener("keydown", (e) => {
   const typing = e.target.matches("input, textarea");
   if (e.key === "/" && !typing) { e.preventDefault(); $("q").focus(); return; }
-  if (e.key === "Escape" && (typing || query)) { const q = $("q"); q.value = ""; q.dispatchEvent(new Event("input")); q.blur(); return; }
-  if (typing || !ST) return;
+  if (e.key === "Escape" && (typing || query || PJ.q)) { const q = $("q"); q.value = ""; q.dispatchEvent(new Event("input")); q.blur(); return; }
+  if (typing || !ST || VIEW !== "sessions") return;
   if (["ArrowDown", "j", "ArrowUp", "k"].includes(e.key)) {
     const step = e.key === "ArrowDown" || e.key === "j" ? 1 : -1;
     const next = neighbor(step) ?? (selected ? null : visibleCards()[0]?.session_id);
@@ -1308,6 +1773,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 load();
+if (location.hash === "#projects") showView();
 // Statuses change while the page sits open next to the terminal: refresh while it's visible.
 setInterval(() => { if (!document.hidden) load(); }, 30000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });

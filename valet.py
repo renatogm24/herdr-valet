@@ -1258,6 +1258,165 @@ def project_remove(pid: str) -> dict:
     return out
 
 
+def _project_cli(args: list[str], timeout: int = 60):
+    """`code project <args> --json` through project_command; its JSON, or its error."""
+    if not CONF["project_command"]:
+        raise ValueError("project management is off: set project_command")
+    return json.loads(_run_launcher(CONF["project_command"].format(args=shlex.join([*args, "--json"])), timeout) or "null")
+
+
+def _flags(**kw: str) -> list[str]:
+    """--key value for each non-empty value (key_with_underscores → --key-with-dashes)."""
+    out = []
+    for k, v in kw.items():
+        if str(v or "").strip():
+            out += [f"--{k.replace('_', '-')}", str(v).strip()]
+    return out
+
+
+def project_list() -> dict:
+    """Your projects with each worktree's git status (dirty, ahead, merged…), the ad-hoc folders, and
+    which of them have an open Claude session or a parked card (so the page warns before removing)."""
+    projects = _project_cli(["list", "--status"])
+    adhoc = _project_cli(["adhoc"])
+    live = [d.get("cwd") or "" for d in claude_processes() if d.get("kind") != "bg"]
+    parked = [c.get("cwd") or "" for c in cards()]
+    under = lambda paths, d: sum(1 for x in paths if x == d or x.startswith(d.rstrip("/") + "/"))
+    for p in projects:
+        for w in p["worktrees"]:
+            w["open"], w["parked"] = under(live, w["path"]), under(parked, w["path"])
+    for a in adhoc:
+        a["open"], a["parked"] = under(live, a["path"]), under(parked, a["path"])
+    return {"projects": projects, "adhoc": adhoc, "home": str(HOME)}
+
+
+def project_create(name: str, context: str = "", github: str = "", no_github: bool = False,
+                   public: bool = False, ptype: str = "single", label: str = "", pid: str = "",
+                   path: str = "") -> dict:
+    """A new project: folder, git, first commit, and a private GitHub repo unless no_github."""
+    if pid and not PROJECT_ID_RE.match(pid):
+        raise ValueError("the id is lowercase letters, digits and -")
+    args = ["create", name.strip(), *_flags(context=context, dir=path, id=pid, label=label, type=ptype)]
+    args += ["--no-github"] if no_github else _flags(github=github)
+    args += ["--public"] if public and not no_github else []
+    out = _project_cli(args, 120)
+    log(f"project created: {out.get('id')} ({out.get('path')}{', ' + out['github'] if out.get('github') else ''})")
+    return out
+
+
+def project_clone(src: str, context: str = "", ptype: str = "single", label: str = "", pid: str = "",
+                  path: str = "") -> dict:
+    if pid and not PROJECT_ID_RE.match(pid):
+        raise ValueError("the id is lowercase letters, digits and -")
+    out = _project_cli(["clone", src.strip(), *_flags(context=context, dir=path, id=pid, label=label, type=ptype)], 300)
+    log(f"project cloned: {out.get('id')} ({out.get('path')})")
+    return out
+
+
+def project_edit(pid: str, label: str = "", context: str = "", ptype: str = "") -> dict:
+    if not PROJECT_ID_RE.match(pid or ""):
+        raise ValueError("invalid project id")
+    out = _project_cli(["edit", pid, *_flags(label=label, context=context, type=ptype)])
+    log(f"project edited: {pid}")
+    return out
+
+
+def project_scan() -> list[dict]:
+    return _project_cli(["scan"])
+
+
+def project_fetch(ids: list[str]) -> dict:
+    if any(not PROJECT_ID_RE.match(i or "") for i in ids):
+        raise ValueError("invalid project id")
+    return _project_cli(["fetch", *ids], 180)
+
+
+def _sessions_in(path: str) -> int:
+    """Claude processes (not background agents) running in path or under it."""
+    root = path.rstrip("/")
+    return sum(1 for d in claude_processes() if d.get("kind") != "bg"
+               and ((d.get("cwd") or "") == root or (d.get("cwd") or "").startswith(root + "/")))
+
+
+def worktree_remove(path: str, force: bool = False, delete_branch: bool = False) -> dict:
+    """Remove a project's worktree (never its main clone), unless a Claude session is open in it."""
+    path = os.path.expanduser(path.strip())
+    if not path or not Path(path).is_dir():
+        raise ValueError(f"no such directory: {path or '(empty)'}")
+    if _sessions_in(path):
+        raise ValueError("a Claude session is open in that worktree: park or close it first")
+    out = _project_cli(["worktree", "remove", path, *(["--force"] if force else []),
+                        *(["--delete-branch"] if delete_branch else [])])
+    log(f"worktree removed: {path}{' and its branch' if out.get('branch_deleted') else ''}")
+    return out
+
+
+def claude_slug(path: str) -> str:
+    """The folder name Claude Code gives a directory under <config dir>/projects/."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
+def _move_conversations(old: str, new: str) -> int:
+    """Move the conversations Claude keeps for directory `old` to `new` (each account's
+    projects/<slug>/), rewrite the directory they record (their "cwd"), and point the parked cards
+    there. Claude finds a conversation to resume by the directory it runs in, and valet's search and
+    reopen read the cwd inside it. Returns how many transcripts moved."""
+    moved = 0
+    pairs = [(json.dumps(old)[:-1], json.dumps(new)[:-1])]  # "…path  (no closing quote: also matches path/sub)
+    for base in CONFIG_DIRS:
+        src, dst = base / "projects" / claude_slug(old), base / "projects" / claude_slug(new)
+        if not src.is_dir():
+            continue
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in list(src.iterdir()):
+            target = dst / f.name
+            if target.exists():
+                continue
+            f.rename(target)
+            if target.suffix == ".jsonl":
+                st = target.stat()
+                raw = target.read_bytes()
+                for a, b in pairs:
+                    for q in ('"cwd":', '"cwd": '):
+                        raw = raw.replace(f"{q}{a}\"".encode(), f"{q}{b}\"".encode()).replace(
+                            f"{q}{a}/".encode(), f"{q}{b}/".encode())
+                tmp = target.with_suffix(".jsonl.tmp")
+                tmp.write_bytes(raw)
+                os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+                tmp.replace(target)
+                moved += 1
+        try:
+            src.rmdir()
+        except OSError:
+            pass
+    for c in cards():
+        cwd = c.get("cwd") or ""
+        if cwd == old or cwd.startswith(old + "/"):
+            c["cwd"] = new + cwd[len(old):]
+            card_path(c["session_id"]).write_text(json.dumps(c, indent=2, ensure_ascii=False))
+    return moved
+
+
+def project_promote(path: str, name: str, context: str = "", github: str = "", no_github: bool = False,
+                    public: bool = False, ptype: str = "single", label: str = "") -> dict:
+    """Turn an ad-hoc folder into a project: the launcher moves it to ~/code/<context>/<name>, runs
+    git init and creates the repo; valet then moves its Claude conversations along, so parked and
+    past sessions there still resume."""
+    path = os.path.expanduser(path.strip())
+    if not path or not Path(path).is_dir():
+        raise ValueError(f"no such directory: {path or '(empty)'}")
+    path = str(Path(path).resolve())
+    if _sessions_in(path):
+        raise ValueError("a Claude session is open in that folder: park it first (its card moves with it)")
+    args = ["create", name.strip(), "--from", path, *_flags(context=context, label=label, type=ptype)]
+    args += ["--no-github"] if no_github else _flags(github=github)
+    args += ["--public"] if public and not no_github else []
+    out = _project_cli(args, 120)
+    out["conversations_moved"] = _move_conversations(path, out["path"])
+    log(f"ad-hoc {path} is now project {out.get('id')} ({out['path']}, {out['conversations_moved']} conversations moved)")
+    return out
+
+
 _PLUGINS_CACHE: dict = {}
 
 

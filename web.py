@@ -144,6 +144,12 @@ class Handler(BaseHTTPRequestHandler):
                                  "can_edit": bool(valet.CONF["project_command"])})
             except (ValueError, OSError) as e:
                 self._json(400, {"error": str(e)})
+        elif path in ("/api/project-list", "/api/project-scan"):
+            # The Projects view: the registry with each worktree's git status, and repos not in it.
+            try:
+                self._json(200, valet.project_list() if path.endswith("list") else {"repos": valet.project_scan()})
+            except (ValueError, OSError) as e:
+                self._json(400, {"error": str(e)})
         else:
             self._json(404, {"error": "not found"})
 
@@ -176,16 +182,30 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"error": f"{e.__class__.__name__}: {e}"})
 
     def _project(self, action: str) -> None:
-        """Add or remove one of your projects: the fields go in the body."""
+        """Your projects (add, create, clone, promote an ad-hoc folder, edit, remove, fetch) and their
+        worktrees: the fields go in the body."""
         try:
             n = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+            g = lambda k, d="": str(body.get(k) or d)  # noqa: E731
             if action == "add":
-                r = valet.project_add(str(body.get("path") or ""), str(body.get("id") or ""),
-                                      str(body.get("label") or ""), str(body.get("context") or ""),
-                                      str(body.get("type") or "single"))
+                r = valet.project_add(g("path"), g("id"), g("label"), g("context"), g("type", "single"))
+            elif action == "create":
+                r = valet.project_create(g("name"), g("context"), g("github"), bool(body.get("no_github")),
+                                         bool(body.get("public")), g("type", "single"), g("label"), g("id"), g("path"))
+            elif action == "clone":
+                r = valet.project_clone(g("repo"), g("context"), g("type", "single"), g("label"), g("id"), g("path"))
+            elif action == "promote":
+                r = valet.project_promote(g("path"), g("name"), g("context"), g("github"), bool(body.get("no_github")),
+                                          bool(body.get("public")), g("type", "single"), g("label"))
+            elif action == "edit":
+                r = valet.project_edit(g("id"), g("label"), g("context"), g("type"))
+            elif action == "fetch":
+                r = valet.project_fetch([str(i) for i in body.get("ids") or []])
+            elif action == "worktree-remove":
+                r = valet.worktree_remove(g("path"), bool(body.get("force")), bool(body.get("delete_branch")))
             else:
-                r = valet.project_remove(str(body.get("id") or ""))
+                r = valet.project_remove(g("id"))
             self._json(200, {"ok": True, **r})
         except ValueError as e:
             self._json(400, {"error": str(e)})
@@ -207,8 +227,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/new":
             self._new()
             return
-        if url.path in ("/api/project-add", "/api/project-remove"):
-            self._project(url.path.rsplit("-", 1)[1])
+        m = re.fullmatch(r"/api/project-(add|remove|create|clone|promote|edit|fetch|worktree-remove)", url.path)
+        if m:
+            self._project(m.group(1))
             return
         m = re.fullmatch(r"/api/(resume|fresh|delete|park|recap|switch|restart|fork|relaunch|fork-card|context)/([^/]+)", url.path)
         if not m:

@@ -97,6 +97,13 @@
 # prepare_command = "my-launcher prepare {target} --json"
 # launch_command = "my-launcher launch {path} --model {model} --prompt {prompt} --plugins {plugins}"
 
+# The Projects view (create, clone, add, edit and remove projects; clean up worktrees). Off while
+# empty. {args} becomes the shell-quoted arguments, always ending in --json, of one of:
+#   list --status, adhoc, scan, add <dir> …, create <name> …, clone <repo> …, edit <id> …,
+#   remove <id>, fetch [<id>…], worktree remove <path> [--force] [--delete-branch]
+# The reference launcher is `code project` (anku-academy-dev, dev-scripts/lib/project-cli.sh).
+# project_command = "my-launcher project {args}"
+
 # Sessions closed by hand get a card (with summary and Resume) that goes away after this many days.
 # closed_keep_days = 7
 

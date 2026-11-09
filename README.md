@@ -47,19 +47,36 @@ herdr-valet:
    folder), the model (Opus unless the folder remembers another), an optional first message and the
    plugins for that folder (checked as the repo declares them; the repo's MCPs are shown, not
    chosen), and opens Claude in a new tab of the workspace that already holds that repository.
-   Errors from the launcher (a bad branch name, a repo not cloned) come back to the page. With
-   `project_command` set, the page also adds your own projects (an existing clone) and removes them
-   from the list; the folders stay.
-10. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
+   Errors from the launcher (a bad branch name, a repo not cloned) come back to the page. A finder
+   looks for a project in any context.
+10. **Manages your projects (optional):** with `project_command` set, the **Projects** view lists
+   every project with each worktree's git status. The status covers:
+   - Uncommitted files, unpushed commits and commits ahead of the default branch.
+   - Merged, squash merges included.
+   - Remote branch deleted.
+   - The sessions open or parked there.
+
+   From the view you can:
+   - **Create** a project: folder, git, first commit and a private GitHub repo in the owner the
+     context uses.
+   - **Clone** one (`owner/repo` or a URL).
+   - **Add** a folder, from the repos it finds on disk that are not in the list yet.
+   - **Turn an ad-hoc folder into a project.** Its Claude conversations and parked cards move with
+     it, so they still resume.
+   - **Edit** or **remove** your own projects. Team ones are read-only.
+   - **Fetch** a project, or all of them.
+   - **Remove worktrees.** *Can clean up* shows the ones that would lose nothing. A worktree with a
+     session open is never removed, and its branch only goes if its content is merged.
+11. **Parks everything before a reboot, and brings it back:** `park-all` writes every open
    session's card in parallel and only then closes them, as one batch; `restore` reopens the
    newest batch, each session in its project's workspace, in the order they sat in herdr's
    sidebar. A reboot nobody prepared for leaves a batch too (the snapshot's), so `restore` also
    brings back what it cut off. Both are buttons on the page as well.
-11. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
+12. **Syncs to a webhook (optional):** with `sync_url` set, every 10 min it POSTs what is new
    since the last run: each conversation entry (user and assistant text, by `uuid`), cards and
    recaps. No LLM on the machine; whoever receives it summarizes. Sessions in a herdr tab named
    `knowledge-…` send everything, tool calls and results included. Secrets are masked first.
-12. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
+13. **Feeds Jira and GitHub (optional):** right after sync, `feed` sends what changed in *your*
    Jira issues (assigned, reported or watched: state, changes, comments) and GitHub PRs (yours and
    the reviews asked of you: state, your reviews and comments, mentions) to the same webhook.
    Read-only on both sides; Jira through a read-only API token, GitHub through `gh`.
