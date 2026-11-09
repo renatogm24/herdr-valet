@@ -36,6 +36,7 @@ is about to close, and anything running in the background (subagents, tasks) is 
 | To load an update, new MCPs, plugins or skills | `restart` | Same conversation, same tab |
 | To ask something on the side | `fork` | A copy in a new tab; this session is untouched |
 | Work in a project | `new <id>[@<branch>] [--prompt]` (`/valet:new`) | Opens the branch's worktree or creates it; `adhoc:[name]` makes a scratch folder |
+| To create, clone or add a project, or clean up worktrees | The **Projects** view on valet's page (no CLI command) | Shows each worktree's git status and what can be removed without losing anything |
 | An old session | `search <words>`, then `resume <session_id> [--fork]` (`/valet:find`) | Resume re-reads the whole conversation: on a big, cold one that costs dollars. `fresh <session_id>` starts it over from its card instead |
 | To reboot the machine | `park-all`, then later `restore` | One batch; restore reopens it where it was |
 | To know where an open session stands | `recap <pane_id>` | A summary without closing it |

@@ -7,7 +7,7 @@
       "name": "valet",
       "source": "./plugin",
       "description": "Drive herdr-valet from inside a Claude Code session: park, park-all, restore, restart, fork, continue, fresh, new and find, plus a reference skill on using valet well.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "keywords": ["herdr", "sessions", "park", "handoff", "restart", "fork", "search"],
       "category": "productivity"
     }
