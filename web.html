@@ -309,15 +309,43 @@
   .lf-where .pick.add b { color: var(--accent); }
   .lf-branch { padding: 4px 10px 8px 34px; }
   .lf-open { font-size: 0.8rem; color: var(--body); background: var(--accent-soft); border-radius: 6px; padding: 6px 10px; }
-  .lf-more > summary { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; color: var(--muted); font-size: 0.8rem; }
-  .lf-more > summary::-webkit-details-marker { display: none; }
-  .lf-more > summary b { color: var(--body); font-weight: 600; }
-  .lf-more .lf-change { margin-left: auto; color: var(--accent); font-weight: 600; }
-  .lf-more[open] .lf-change { visibility: hidden; }
-  .lf-more > .field { margin-top: var(--u); }
-  .lf-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .lf-bar .grow { flex: 1; }
-  #ns-note:empty { display: none; }
+  .lf-lbl { color: var(--ink); font-weight: 600; font-size: 0.86rem; }
+  .lf-lbl small { font-weight: 400; color: var(--muted); }
+  .lf-head { display: flex; gap: var(--u); align-items: flex-start; justify-content: space-between; }
+  .lf-head h1 .in { color: var(--muted); font-weight: 500; }
+  .btn.icon { padding: 4px 10px; line-height: 1.2; }
+  #pj-detail .lf-head + .newsess.flat { border-top: 0; padding-top: var(--u); }
+  .lf-opts { display: flex; flex-wrap: wrap; gap: var(--u) calc(var(--u) * 4); align-items: flex-start; }
+  .lf-model { border: 0; padding: 0; margin: 0; min-width: 0; }
+  .lf-model legend { padding: 0; margin-bottom: 6px; }
+  .lf-seg { display: inline-flex; border: 1px solid var(--rule-strong); border-radius: 8px; overflow: hidden; }
+  .lf-seg label { display: block; position: relative; }
+  .lf-seg label + label { border-left: 1px solid var(--rule-strong); }
+  .lf-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .lf-seg span { display: block; padding: 6px 12px; font-weight: 600; font-size: 0.82rem; color: var(--body); cursor: pointer; background: var(--panel); }
+  .lf-seg span:hover { background: var(--raised); }
+  .lf-seg input:checked + span { background: var(--accent); color: var(--accent-ink); }
+  @media (max-width: 560px) {
+    .lf-model, .lf-seg { width: 100%; }
+    .lf-seg label { flex: 1 1 auto; }
+    .lf-seg span { padding: 6px 6px; text-align: center; white-space: nowrap; font-size: 0.8rem; }
+  }
+  .lf-seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: -4px; border-radius: 5px; }
+  .btn.lf-pl { display: inline-flex; gap: 8px; align-items: center; font-size: 0.82rem; max-width: 100%; }
+  .btn.lf-pl small { color: var(--muted); font-weight: 400; }
+  .lf-pl .caret { width: 0; height: 0; border: 5px solid transparent; border-top-color: currentColor; margin-top: 5px; transition: transform 0.15s; }
+  .lf-pl[aria-expanded=true] .caret { transform: rotate(180deg); margin-top: -5px; }
+  @media (prefers-reduced-motion: reduce) { .lf-pl .caret { transition: none; } }
+  .lf-plugins { border: 1px solid var(--rule); border-radius: 8px; padding: calc(var(--u) * 1.25); background: var(--raised); }
+  .lf-plugins[hidden] { display: none; }
+  .lf-plugins .chip { cursor: pointer; }
+  .lf-always { display: grid; gap: 2px; font-size: 0.78rem; color: var(--body); margin: 0; }
+  .lf-always div { display: flex; gap: 8px; }
+  .lf-always dt { color: var(--muted); min-width: 6em; }
+  .lf-always dd { margin: 0; }
+  .lf-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end;
+    border-top: 1px solid var(--rule); padding-top: calc(var(--u) * 1.5); margin-top: calc(var(--u) * 0.5); }
+  .lf-bar .note { margin-right: auto; }
   .pj-wt-h .sect { margin-bottom: var(--u); }
   .pj-main { display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; font-size: 0.9rem; color: var(--body); }
   .pj-rows .detail { margin: 4px calc(var(--u) * 1.5) var(--u) calc(var(--u) * 4); }
@@ -858,26 +886,27 @@ function closeNewPanel() {
 const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 
 // The form, in the order it is used: where (the worktrees themselves, with what git says about
-// each), the first message, then model and Start. Plugins and MCPs rarely change: one line that
-// opens.
+// each), the first message, then model and plugins. Labels are ink, hints are muted and say what
+// happens; plugins stay closed behind a button that names what is on.
 function lfHtml(p) {
+  const lbl = (t, hint = "") => `<span class="lf-lbl">${t}${hint ? ` <small>${hint}</small>` : ""}</span>`;
   let where;
   if (!p) {
-    where = `<label class="wide">Name <small>(optional: names the dated folder)</small>
+    where = `<label class="wide">${lbl("Folder name", "optional; the folder is dated either way")}
       <input name="adhoc" maxlength="60" placeholder="e.g. compare-bank-apis" spellcheck="false"></label>`;
   } else if (p.type === "direct") {
     const w = p.worktrees[0], i = w && wtInfo(p, w);
-    where = `<p class="wide pj-main">In its folder, on <b>${esc(w?.branch || "its branch")}</b>
-      ${i ? `<span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>` : ""}</p>`;
+    where = `<div class="field wide">${lbl("Where")}<p class="pj-main">In its folder, on <b>${esc(w?.branch || "its branch")}</b>
+      ${i ? `<span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>` : ""}</p></div>`;
   } else {
     const row = (w) => `<label class="pick" title="${esc(tilde(w.path))}"><input type="radio" name="wt" value="${esc(w.path)}" ${w.path === NS.wt ? "checked" : ""}>
         <b>${esc(w.branch || w.path.split("/").pop())}</b>
         <small>${w.last_accessed ? `used ${ago(fromTs(w.last_accessed))}` : "not used yet"}</small>
         <span class="st-chips">${wtInfo(p, w).chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span></label>`;
-    where = `<div class="field wide"><span>Where</span><div class="picks lf-where" role="radiogroup" aria-label="Worktree">
+    where = `<div class="field wide">${lbl("Where")}<div class="picks lf-where" role="radiogroup" aria-label="Where">
         ${p.worktrees.map(row).join("")}
         <label class="pick add"><input type="radio" name="wt" value="${NEW_WT}" ${NS.wt === NEW_WT ? "checked" : ""}>
-          <b>+ New branch</b><small>A new worktree; the branch is used if it exists here or on origin</small></label>
+          <b>+ New branch</b><small>Its own folder; an existing branch with that name is reused</small></label>
         ${NS.wt === NEW_WT ? `<div class="lf-branch"><input name="branch" placeholder="branch name, e.g. fix-timezone" spellcheck="false" aria-label="New branch name"></div>` : ""}
       </div>${lfOpenHere()}</div>`;
   }
@@ -886,19 +915,19 @@ function lfHtml(p) {
   const models = MODELS.some(([v]) => v === want) ? MODELS : [...MODELS, [want, want]];
   return `<form class="newsess flat" id="new-panel" aria-label="New session" autocomplete="off">
     ${where}
-    <label class="wide">Goal <small>(optional: the session's first message; empty, Claude waits for you)</small>
+    <label class="wide">${lbl("First message", "optional; empty, Claude waits for you")}
       <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing">${esc(PJ.launch?.prompt || "")}</textarea></label>
-    <details class="wide lf-more" ${PJ.launch?.more ? "open" : ""}><summary><span id="lf-sum"></span><span class="lf-change">Change</span></summary>
-      <div class="field" id="ns-plugins"></div></details>
-    <div class="wide lf-bar">
-      <input type="hidden" name="model" value="${esc(want)}">
-      <div class="seg" role="group" aria-label="Model">${models.map(([v, l]) =>
-        `<button type="button" data-model="${esc(v)}" aria-pressed="${v === want}">${esc(l)}</button>`).join("")}</div>
-      <span class="grow"></span>
-      ${p ? `<button class="btn" type="button" data-ns="cancel">Cancel</button>` : ""}
-      <button class="btn primary" type="submit" title="${MAC ? "⌘" : "Ctrl"}+Enter">Start<kbd>${MAC ? "⌘↵" : "Ctrl ↵"}</kbd></button>
+    <div class="wide lf-opts">
+      <fieldset class="lf-model"><legend class="lf-lbl">Model</legend><div class="lf-seg">${models.map(([v, l]) =>
+        `<label><input type="radio" name="model" value="${esc(v)}" ${v === want ? "checked" : ""}><span>${esc(l)}</span></label>`).join("")}</div></fieldset>
+      <div class="field">${lbl("Plugins")}<button type="button" class="btn lf-pl" aria-expanded="${!!PJ.launch?.more}" aria-controls="ns-plugins"></button></div>
     </div>
-    <p class="note wide" id="ns-note" role="status" aria-live="polite"></p>
+    <div class="field wide lf-plugins" id="ns-plugins" ${PJ.launch?.more ? "" : "hidden"}></div>
+    <div class="wide lf-bar">
+      <span class="note" id="ns-note" role="status" aria-live="polite"></span>
+      ${p ? `<button class="btn" type="button" data-ns="cancel">Cancel</button>` : ""}
+      <button class="btn primary" type="submit" title="${MAC ? "⌘" : "Ctrl"}+Enter">Start session</button>
+    </div>
   </form>`;
 }
 
@@ -910,17 +939,15 @@ function lfOpenHere() {
   const here = (ST?.live || []).filter((s) => s.cwd && (s.cwd === w.path || s.cwd.startsWith(w.path + "/")));
   const names = here.map((s) => `“${esc(s.title || s.place || s.label)}”`).join(", ");
   return `<p class="lf-open">${w.open === 1 ? "A session is" : `${w.open} sessions are`} already open here${names ? `: ${names}` : ""}.
-    Start opens another next to it. <a href="#" data-ns="sessions">See it in Sessions</a></p>`;
+    Starting opens another next to it. <a href="#" data-ns="sessions">See it in Sessions</a></p>`;
 }
 
-function lfSummary() {
-  const box = $("ns-plugins"), sum = $("lf-sum");
-  if (!box || !sum) return;
-  const on = [...box.querySelectorAll("[data-plugin]:checked")].map((c) => shortPlugin(c.dataset.plugin));
-  const mcps = [...box.querySelectorAll(".checks label.locked")]
-    .map((l) => [...l.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join("").trim()).filter(Boolean);
-  sum.innerHTML = `<b>Plugins</b> ${on.length ? esc(on.join(", ")) : "none extra"}${NS.touched ? " <small>(changed)</small>" : ""}
-    <span class="sep">·</span> <b>MCPs</b> ${mcps.length ? esc(mcps.join(", ")) : "none"}`;
+// The Plugins button names what is on beyond the always-on ones, and says it opens.
+function lfPlLabel() {
+  const btn = document.querySelector("#new-panel .lf-pl");
+  if (!btn) return;
+  const on = [...$("ns-plugins").querySelectorAll("[data-plugin][aria-pressed=true]")].map((c) => c.dataset.name);
+  btn.innerHTML = `${on.length ? esc(on.join(", ")) : "Add plugins"}${NS.touched ? " <small>(changed)</small>" : ""}<span class="caret" aria-hidden="true"></span>`;
 }
 
 function lfWire() {
@@ -928,16 +955,18 @@ function lfWire() {
   if (!form) return;
   form.querySelectorAll("input[name=wt]").forEach((r) => (r.onchange = () => {
     PJ.launch.prompt = form.elements.prompt.value;
-    NS.wt = r.value; NS.touched = false;
+    NS.wt = r.value; NS.touched = false; PJ.launch.pl = null;
     pjRenderDetail();
     const f = $("new-panel");
     (NS.wt === NEW_WT ? f.elements.branch : f.querySelector("input[name=wt]:checked"))?.focus();
   }));
-  form.querySelectorAll("[data-model]").forEach((b) => (b.onclick = () => {
-    PJ.launch.model = form.elements.model.value = b.dataset.model;
-    form.querySelectorAll("[data-model]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
-  }));
-  form.querySelector(".lf-more").ontoggle = (e) => { PJ.launch.more = e.target.open; };
+  form.querySelectorAll("input[name=model]").forEach((r) => (r.onchange = () => { PJ.launch.model = r.value; }));
+  const pl = form.querySelector(".lf-pl");
+  pl.onclick = () => {
+    PJ.launch.more = !PJ.launch.more;
+    pl.setAttribute("aria-expanded", String(PJ.launch.more));
+    $("ns-plugins").hidden = !PJ.launch.more;
+  };
   form.querySelector("[data-ns=cancel]")?.addEventListener("click", closeNewPanel);
   form.querySelector("[data-ns=sessions]")?.addEventListener("click", (e) => { e.preventDefault(); location.hash = ""; });
   form.onkeydown = (e) => {
@@ -946,8 +975,7 @@ function lfWire() {
   };
   form.onsubmit = (e) => { e.preventDefault(); nsStart(); };
   nsRenderPlugins();
-  $("ns-plugins").addEventListener("change", lfSummary);
-  lfSummary();
+  lfPlLabel();
 }
 
 // Plugins: the ones that are not on for every session, checked as the repo declares them, then as
@@ -977,19 +1005,29 @@ function nsRenderPlugins() {
   const box = $("ns-plugins"), p = nsProject();
   const { declared, ids } = nsPluginBase();
   const on = nsApplySpec(Object.fromEntries(ids.map((id) => [id, !!declared[id]])), nsWorktree()?.plugins || "");
+  // What was toggled here survives a redraw of the form (it is cleared when the folder changes).
+  if (NS.touched && PJ.launch?.pl) Object.assign(on, PJ.launch.pl);
   const dup = (id) => ids.filter((x) => shortPlugin(x) === shortPlugin(id)).length > 1;
   const always = PLUGINS.filter((x) => x.always).map((x) => shortPlugin(x.id));
   const repoMcps = NS.ctx === ADHOC ? [] : (p?.mcps || []);
-  const mcps = [...repoMcps.map((m) => [m, "repo"]), ...USER_MCPS.filter((m) => !repoMcps.includes(m)).map((m) => [m, "everywhere"])];
-  box.innerHTML = `<span>Plugins <small>(for this folder; remembered)</small></span>
-    ${ids.length ? `<div class="checks">${ids.map((id) => `<label title="${esc(id)}${id in declared ? " · the repo declares it" : ""}">
-      <input type="checkbox" data-plugin="${esc(id)}" ${on[id] ? "checked" : ""}>${esc(dup(id) ? id : shortPlugin(id))}${id in declared ? " <small>repo</small>" : ""}</label>`).join("")}</div>`
-      : `<small>No optional plugins installed</small>`}
-    ${always.length ? `<small>Always on: ${esc(always.join(", "))}</small>` : ""}
-    <span>MCPs <small>(${repoMcps.length ? "the repo's .mcp.json and yours" : NS.ctx === ADHOC ? "an ad-hoc folder has only yours" : "this repo declares none; yours"}: they always load)</small></span>
-    ${mcps.length ? `<div class="checks">${mcps.map(([m, from]) => `<label class="locked" title="${from === "repo" ? "Declared in the repo's .mcp.json: change it there" : "User scope (~/.claude.json): every session"}">
-      <input type="checkbox" checked disabled>${esc(m)} <small>${from}</small></label>`).join("")}</div>` : `<small>None</small>`}`;
-  box.querySelectorAll("[data-plugin]").forEach((c) => (c.onchange = () => (NS.touched = true)));
+  const mcps = [...repoMcps, ...USER_MCPS.filter((m) => !repoMcps.includes(m))];
+  box.innerHTML = `${ids.length ? `<div class="chips" role="group" aria-label="Plugins">${ids.map((id) => {
+      const name = dup(id) ? id : shortPlugin(id);
+      return `<button type="button" class="chip" data-plugin="${esc(id)}" data-name="${esc(name)}" aria-pressed="${!!on[id]}"
+        title="${esc(id)}${id in declared ? " · the repo turns it on" : ""}">${esc(name)}${id in declared ? " <small>repo</small>" : ""}</button>`;
+    }).join("")}</div><small>Remembered for this folder.</small>`
+      : `<small>No optional plugins installed.</small>`}
+    <dl class="lf-always">
+      ${always.length ? `<div><dt>Always on</dt><dd>${esc(always.join(", "))}</dd></div>` : ""}
+      <div><dt>MCPs</dt><dd>${mcps.length ? `${esc(mcps.join(", "))} <small>(always load; ${repoMcps.length ? "the repo's .mcp.json and yours" : "yours"})</small>` : "none"}</dd></div>
+    </dl>`;
+  box.querySelectorAll("[data-plugin]").forEach((c) => (c.onclick = () => {
+    const now = c.getAttribute("aria-pressed") !== "true";
+    c.setAttribute("aria-pressed", String(now));
+    NS.touched = true;
+    if (PJ.launch) PJ.launch.pl = { ...PJ.launch.pl, [c.dataset.plugin]: now };
+    lfPlLabel();
+  }));
 }
 
 // The --plugins spec: "" (untouched: keep what the folder has), "+" (back to what the repo declares)
@@ -998,8 +1036,9 @@ function nsPluginSpec() {
   if (!NS.touched) return "";
   const { declared } = nsPluginBase();
   const diff = [...$("ns-plugins").querySelectorAll("[data-plugin]")]
-    .filter((c) => c.checked !== !!declared[c.dataset.plugin])
-    .map((c) => `${c.checked ? "+" : "-"}${c.dataset.plugin}`);
+    .map((c) => [c, c.getAttribute("aria-pressed") === "true"])
+    .filter(([c, on]) => on !== !!declared[c.dataset.plugin])
+    .map(([c, on]) => `${on ? "+" : "-"}${c.dataset.plugin}`);
   return diff.join(",") || "+";
 }
 
@@ -1492,12 +1531,22 @@ function pjRenderDetail() {
         ${nSafe ? `<button class="btn small" type="button" data-pa="clean" title="Review and remove the ones that lose nothing">Clean up ${nSafe}</button>` : ""}</div>
       <ul class="wts">${p.worktrees.map((w, k) => wtRow(p, w, infos[k])).join("")}</ul>`;
   }
+  if (PJ.launch?.id === p.id) {
+    PJD.innerHTML = `
+      <div class="sign"><span class="bullet"></span>${esc(p.context)}${team ? `<span class="sub">· team</span>` : ""}</div>
+      <div class="lf-head"><h1>New session <span class="in">in ${esc(p.label)}</span></h1>
+        <button class="btn icon" type="button" data-ns="close" aria-label="Close" title="Close (Esc)">✕</button></div>
+      ${body}`;
+    PJD.querySelector("[data-ns=close]").onclick = closeNewPanel;
+    lfWire();
+    return;
+  }
   PJD.innerHTML = `
     <div class="sign"><span class="bullet"></span>${esc(p.context)}${team ? `<span class="sub">· team</span>` : ""}</div>
     <h1>${esc(p.label)} <code class="id">${esc(p.id)}</code></h1>
     <div class="facts">${facts}</div>
     <div class="actions">
-      ${ST?.can_launch && PJ.launch?.id !== p.id ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session</button>` : ""}
+      ${ST?.can_launch ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session</button>` : ""}
       <button class="btn" type="button" data-pa="fetch" ${p.cloned ? "" : "disabled"} title="git fetch --prune: updates merged and deleted branches">Fetch</button>
       <details class="more"><summary class="btn" aria-label="More for ${esc(p.label)}">⋯</summary><div class="menu">
         ${team ? `<button type="button" disabled>Team project<small>It changes by PR to the launcher's config/projects.conf</small></button>`
