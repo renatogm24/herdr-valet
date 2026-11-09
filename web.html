@@ -284,7 +284,21 @@
   .seg button { font: inherit; font-size: 0.8rem; font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
   .seg button[aria-pressed=true] { background: var(--raised); color: var(--ink); }
   .seg button b { color: var(--ink); margin-left: 5px; font-weight: 600; opacity: 0.7; }
-  .pj-tabs { margin: 2px calc(var(--u) * 2) var(--u); }
+  .pj-tabs { display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; margin: 2px calc(var(--u) * 2) var(--u); }
+  .pj-tabs .seg { flex-wrap: nowrap; flex: none; }
+  .pj-tabs .seg button { padding: 3px 8px; }
+  .pj-tabs .seg + .seg { margin-left: auto; }
+  .pj-how { flex-wrap: wrap; }
+  .pj-h1 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+  .pj-h1 .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--line); flex: none; align-self: center; }
+  .tag { font-size: 0.72rem; font-weight: 600; letter-spacing: 0; color: var(--muted); border: 1px solid var(--rule-strong); border-radius: 999px; padding: 1px 8px; align-self: center; }
+  .vd { font-size: 0.72rem; font-weight: 700; border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+  .vd.ok { background: var(--ok); color: var(--panel); }
+  .vd.warn { background: var(--warn); color: var(--panel); }
+  .in { color: var(--muted); font-weight: 500; }
+  .lf-sub { font-size: 0.86rem; color: var(--body); }
+  .newsess .pj-opts > summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 0.82rem; width: max-content; }
+  .pj-opts[open] { display: grid; gap: var(--u); }
   .pj-rows { list-style: none; }
   .pj-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 1px var(--u); align-items: center; width: 100%; text-align: left;
     font: inherit; color: inherit; background: none; border: 0; padding: 7px calc(var(--u) * 2); cursor: pointer; }
@@ -312,7 +326,7 @@
   .lf-lbl { color: var(--ink); font-weight: 600; font-size: 0.86rem; }
   .lf-lbl small { font-weight: 400; color: var(--muted); }
   .lf-head { display: flex; gap: var(--u); align-items: flex-start; justify-content: space-between; }
-  .lf-head h1 .in { color: var(--muted); font-weight: 500; }
+
   .btn.icon { padding: 4px 10px; line-height: 1.2; }
   #pj-detail .lf-head + .newsess.flat { border-top: 0; padding-top: var(--u); }
   .lf-opts { display: flex; flex-wrap: wrap; gap: var(--u) calc(var(--u) * 4); align-items: flex-start; }
@@ -348,7 +362,14 @@
   .lf-bar .note { margin-right: auto; }
   .pj-wt-h .sect { margin-bottom: var(--u); }
   .pj-main { display: flex; flex-wrap: wrap; gap: 6px var(--u); align-items: center; font-size: 0.9rem; color: var(--body); }
-  .pj-rows .detail { margin: 4px calc(var(--u) * 1.5) var(--u) calc(var(--u) * 4); }
+  /* on a narrow screen the detail opens inside the list: one surface, not a card in a card */
+  @media (max-width: 860px) {
+    #pj-list .detail { margin: 4px 0; border: 0; border-radius: 0; box-shadow: none; background: var(--ground);
+      border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); border-left: 3px solid var(--line); }
+    #pj-detail .facts { display: block; }
+    #pj-detail .facts > span { display: inline; }
+    #pj-detail .facts > span + span::before { content: " · "; color: var(--faint); }
+  }
   .wts { list-style: none; border: 1px solid var(--rule); border-radius: 8px; }
   .wt { display: grid; grid-template-columns: minmax(110px, 240px) minmax(0, 1fr) auto auto; gap: 6px calc(var(--u) * 1.5); align-items: center;
     padding: 6px 8px 6px 12px; font-size: 0.84rem; }
@@ -358,8 +379,7 @@
   .wt .acts { display: flex; gap: 6px; justify-content: flex-end; }
   .st-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
   .sc { font-size: 0.72rem; font-weight: 600; border-radius: 999px; padding: 1px 8px; background: var(--raised); color: var(--body); white-space: nowrap; }
-  .sc.ok { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
-  .sc.warn { background: var(--warn-soft); color: var(--warn); }
+
   .sc.live { background: var(--accent-soft); color: var(--accent); }
   .wt-confirm { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 0.82rem;
     background: var(--bad-soft); border-radius: 6px; padding: 8px 10px; }
@@ -455,8 +475,6 @@
       <div class="acts" id="pj-acts"></div>
       <div class="note" id="pj-note" role="status" aria-live="polite"></div>
     </div>
-    <form class="newsess" id="pj-new" hidden aria-label="New project" autocomplete="off"></form>
-    <form class="newsess" id="pj-clean" hidden aria-label="Clean up worktrees" autocomplete="off"></form>
     <datalist id="pj-ctxs"></datalist>
   </section>
   <section class="board" aria-label="Projects">
@@ -867,6 +885,7 @@ function pjApplyPending() {
 // Open the form for project p (null: a new ad-hoc session) on worktree wt (a path, NEW_WT or "").
 function pjLaunch(p, wt, prompt = "") {
   PJ.launch = { id: p ? p.id : ADHOC_NEW, prompt };
+  PJ.panel = null; PJ.clean = null;
   NS = { ctx: p ? p.context : ADHOC, id: p ? p.id : "", wt, touched: false };
   PJ.sel = p ? p.id : ADHOC_NEW;
   PJ.editing = null; PJ.removing = null;
@@ -889,7 +908,6 @@ const MAC = /Mac|iPhone|iPad/.test(navigator.platform);
 // each), the first message, then model and plugins. Labels are ink, hints are muted and say what
 // happens; plugins stay closed behind a button that names what is on.
 function lfHtml(p) {
-  const lbl = (t, hint = "") => `<span class="lf-lbl">${t}${hint ? ` <small>${hint}</small>` : ""}</span>`;
   let where;
   if (!p) {
     where = `<label class="wide">${lbl("Folder name", "optional; the folder is dated either way")}
@@ -897,12 +915,12 @@ function lfHtml(p) {
   } else if (p.type === "direct") {
     const w = p.worktrees[0], i = w && wtInfo(p, w);
     where = `<div class="field wide">${lbl("Where")}<p class="pj-main">In its folder, on <b>${esc(w?.branch || "its branch")}</b>
-      ${i ? `<span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>` : ""}</p></div>`;
+      ${i ? chipsHtml(i) : ""}</p></div>`;
   } else {
     const row = (w) => `<label class="pick" title="${esc(tilde(w.path))}"><input type="radio" name="wt" value="${esc(w.path)}" ${w.path === NS.wt ? "checked" : ""}>
         <b>${esc(w.branch || w.path.split("/").pop())}</b>
         <small>${w.last_accessed ? `used ${ago(fromTs(w.last_accessed))}` : "not used yet"}</small>
-        <span class="st-chips">${wtInfo(p, w).chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span></label>`;
+        ${chipsHtml(wtInfo(p, w))}</label>`;
     where = `<div class="field wide">${lbl("Where")}<div class="picks lf-where" role="radiogroup" aria-label="Where">
         ${p.worktrees.map(row).join("")}
         <label class="pick add"><input type="radio" name="wt" value="${NEW_WT}" ${NS.wt === NEW_WT ? "checked" : ""}>
@@ -1341,7 +1359,8 @@ function keepSelection() {
 let VIEW = "sessions";
 let PJ = { data: null, err: "", loading: false, tab: "", sel: null, q: "", panel: null, clean: null, scan: null, editing: null, removing: null,
   adhoc: null, done: null, launch: null, pending: null };
-const KINDS = [["single", "A worktree per branch"], ["direct", "One folder, works on its branch"]];
+const KINDS = [["single", "A worktree per branch"], ["direct", "One folder, on its branch"]];
+const lbl = (t, hint = "") => `<span class="lf-lbl">${t}${hint ? ` <small>${hint}</small>` : ""}</span>`;
 const kindOptions = (sel) => KINDS.map(([v, l]) => `<option value="${v}" ${v === sel ? "selected" : ""}>${l}</option>`).join("");
 const tilde = (p) => (PJ.data?.home && p && (p === PJ.data.home || p.startsWith(PJ.data.home + "/")) ? "~" + p.slice(PJ.data.home.length) : p || "");
 const fromTs = (ts) => (ts ? new Date(ts * 1000).toISOString() : null);
@@ -1390,22 +1409,29 @@ function pjOwner(ctx) {
   return Object.entries(n).sort((a, b) => b[1] - a[1])[0]?.[0] || "";
 }
 
-// What a worktree's git status means, as chips; removable: a worktree of its own (never the main
-// clone); safe: removing it loses nothing (clean, pushed, its work merged or none of its own).
+// What a worktree's git status means: neutral facts as chips, and one verdict that carries the
+// color. "unsaved": work that exists only here (files not committed, commits not pushed); "to clean
+// up": removing it loses nothing. removable: a worktree of its own (never the main clone).
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 function wtInfo(p, w) {
   const s = w.status || {}, main = w.path === p.path, chips = [];
-  if (s.dirty) chips.push(["warn", `${s.dirty} uncommitted`, "Files with changes not committed"]);
-  if (s.unpushed) chips.push(["warn", `${s.unpushed} unpushed`, "Commits not on its remote branch"]);
-  if (!main && s.merged) chips.push(["ok", "merged", `Its changes are already in ${p.base}`]);
+  if (s.dirty) chips.push(["", plural(s.dirty, "file not committed", "files not committed"), "Changes in the folder that are not in a commit"]);
+  if (s.unpushed) chips.push(["", plural(s.unpushed, "commit not pushed", "commits not pushed"), "Commits that are not on its remote branch"]);
+  if (!main && s.merged) chips.push(["", "merged", `Its commits are already in ${p.base}`]);
   else if (!main && s.ahead === 0) chips.push(["", "no commits of its own", `Nothing that is not in ${p.base}`]);
   else if (!main && s.ahead > 0) chips.push(["", `${s.ahead} ahead`, `Commits not in ${p.base}`]);
   if (!main && s.upstream === "gone" && !s.merged) chips.push(["", "remote branch deleted", "Its branch on origin is gone (deleted after a merge, or by hand)"]);
   if (w.open) chips.push(["live", `${w.open} open`, "Claude sessions running here"]);
-  if (w.parked) chips.push(["", `${w.parked} parked`, "Parked cards in this folder"]);
+  if (w.parked) chips.push(["", `${w.parked} parked`, "Parked sessions in this folder"]);
   const removable = !main && p.type === "single";
-  const safe = removable && !s.dirty && !s.unpushed && (s.merged || s.ahead === 0) && !w.open;
-  return { chips, removable, safe };
+  const unsaved = !!(s.dirty || s.unpushed);
+  const safe = removable && !unsaved && (s.merged || s.ahead === 0) && !w.open;
+  const verdict = unsaved ? ["warn", "unsaved", "Work that exists only in this folder"]
+    : safe ? ["ok", "to clean up", "Removing it loses nothing"] : null;
+  return { chips, removable, safe, verdict };
 }
+const chipsHtml = (i) => `<span class="st-chips">${i.verdict ? `<span class="vd ${i.verdict[0]}" title="${esc(i.verdict[2])}">${i.verdict[1]}</span>` : ""}${
+  i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>`;
 
 // The view is a list and a detail, like Sessions: one line per project of the chosen context (or
 // what the search matches in any), and the selected project's worktrees beside it. On a narrow
@@ -1445,49 +1471,62 @@ function pjRender() {
   if (PJ.sel === ADHOC_NEW && !PJ.launch) { PJ.launch = { id: ADHOC_NEW, prompt: "" }; NS = { ctx: ADHOC, id: "", wt: "", touched: false }; }
 
   const tabs = words.length ? `<p class="map-filter">Searching every context</p>`
-    : `<div class="seg pj-tabs" role="tablist" aria-label="Context">${ctxs.map((c) => {
-        const n = c === ADHOC ? PJ.data.adhoc.length : all.filter((p) => p.context === c).length;
-        return `<button type="button" role="tab" data-tab="${esc(c)}" aria-pressed="${c === PJ.tab}" aria-selected="${c === PJ.tab}">${esc(c)}<b>${n}</b></button>`;
-      }).join("")}</div>`;
+    : `<div class="pj-tabs">${[ctxs.filter((c) => c !== ADHOC), ctxs.filter((c) => c === ADHOC)].filter((g) => g.length).map((g) =>
+        `<div class="seg" role="tablist" aria-label="${g[0] === ADHOC ? "Ad-hoc folders" : "Context"}">${g.map((c) => {
+          const n = c === ADHOC ? PJ.data.adhoc.length : all.filter((p) => p.context === c).length;
+          return `<button type="button" role="tab" data-tab="${esc(c)}" aria-pressed="${c === PJ.tab}" aria-selected="${c === PJ.tab}">${c === ADHOC ? "Ad-hoc" : esc(c)}<b>${n}</b></button>`;
+        }).join("")}</div>`).join("")}</div>`;
   list.innerHTML = `${tabs}<ul class="pj-rows">${adhocTab ? adhocRows(folders) : shown.map((p) => pjRow(p, words.length)).join("")}</ul>
     ${ids.length ? "" : `<p class="map-empty">${words.length ? "No project matches." : "Nothing here yet."}</p>`}`;
-  list.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.tab = b.dataset.tab; lsSet("valet-pj-tab", PJ.tab); PJ.sel = null; pjRender(); }));
+  list.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.tab = b.dataset.tab; lsSet("valet-pj-tab", PJ.tab); PJ.sel = null; PJ.panel = null; PJ.clean = null; pjRender(); }));
   list.querySelectorAll(".pj-row").forEach((b) => (b.onclick = () => pjSelect(b.dataset.id, false)));
   pjRenderDetail();
 }
 
-// One line: its name and worktree count, then what needs you (to clean up, unsaved, open) and when.
+// The row of the selected project (none while New project or Clean up fills the detail).
+const pjCurrent = (id) => !PJ.panel && !PJ.clean && id === PJ.sel;
+
+// One line: its name, then what it has (worktrees or one folder), what needs you (to clean up,
+// unsaved, open) and when it was last used.
 function pjRow(p, searching) {
   const infos = p.worktrees.map((w) => wtInfo(p, w));
   const safe = infos.filter((i) => i.safe).length, unsaved = p.worktrees.filter(unsavedWt).length;
   const open = p.worktrees.reduce((n, w) => n + (w.open || 0), 0);
   const bits = [
     searching ? esc(p.context) : "",
-    safe ? `<span class="w">${safe} to clean up</span>` : "",
-    unsaved ? `<span class="u">${unsaved} unsaved</span>` : "",
+    !p.cloned ? "not cloned" : p.type === "direct" ? "one folder" : p.worktrees.length ? plural(p.worktrees.length, "worktree", "worktrees") : "no worktrees",
+    safe ? `<span class="w" title="Worktrees that lose nothing if removed">${safe} to clean up</span>` : "",
+    unsaved ? `<span class="u" title="Worktrees with files not committed or commits not pushed">${unsaved} unsaved</span>` : "",
     open ? `<span class="o">${open} open</span>` : "",
-    !p.cloned ? "not cloned" : p.type === "direct" ? "one folder" : !p.worktrees.length ? "no worktrees" : "",
-    p.last_accessed ? short(fromTs(p.last_accessed)) : "",
   ].filter(Boolean);
-  const n = p.type === "single" && p.worktrees.length ? p.worktrees.length : "";
-  return `<li><button type="button" class="pj-row" data-id="${esc(p.id)}" aria-current="${p.id === PJ.sel}" style="--line:${lineColor(p.id)}"
+  return `<li><button type="button" class="pj-row" data-id="${esc(p.id)}" aria-current="${pjCurrent(p.id)}" style="--line:${lineColor(p.id)}"
       title="${esc(p.id)} · ${esc(tilde(p.path))}">
-    <span class="bullet"></span><span class="t">${esc(p.label)}</span><span class="c" title="${n ? `${n} worktrees` : ""}">${n}</span>
+    <span class="bullet"></span><span class="t">${esc(p.label)}</span><span class="c" title="Last used">${p.last_accessed ? short(fromTs(p.last_accessed)) : ""}</span>
     <span class="s">${bits.join(" · ")}</span></button></li>`;
 }
 
-// The ad-hoc tab: a new ad-hoc session first, then the folders, newest first.
+// An ad-hoc folder is named <date>-<name>: the name leads, the date is when it was made.
+const adhocName = (a) => a.name.replace(/^\d{4}-\d{2}-\d{2}-?/, "") || "unnamed";
+function adhocMade(a) {
+  const m = a.name.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString("en", { month: "short", day: "numeric" }) : "";
+}
+
+// The ad-hoc section: a new ad-hoc session first, then the folders, newest first.
 function adhocRows(folders) {
-  const row = (id, title, sub, color) => `<li><button type="button" class="pj-row" data-id="${esc(id)}" aria-current="${id === PJ.sel}" style="--line:${color}">
-    <span class="bullet"></span><span class="t">${title}</span><span class="c"></span><span class="s">${sub}</span></button></li>`;
+  const row = (id, title, sub, color, when = "") => `<li><button type="button" class="pj-row" data-id="${esc(id)}" aria-current="${pjCurrent(id)}" style="--line:${color}">
+    <span class="bullet"></span><span class="t">${title}</span><span class="c" title="Last used">${when}</span><span class="s">${sub}</span></button></li>`;
   return (ST?.can_launch ? row(ADHOC_NEW, "+ New ad-hoc session", "a dated scratch folder, no git", "var(--accent)") : "")
-    + folders.map((a) => row("adhoc:" + a.path, esc(a.name), [
-      `${a.files} file${a.files === 1 ? "" : "s"}`, a.open ? `<span class="o">${a.open} open</span>` : "",
-      a.parked ? `${a.parked} parked` : "", a.last_accessed ? short(fromTs(a.last_accessed)) : ""].filter(Boolean).join(" · "), "var(--rule-strong)")).join("");
+    + folders.map((a) => row("adhoc:" + a.path, esc(adhocName(a)), [
+      adhocMade(a) ? `made ${adhocMade(a)}` : "", plural(a.files, "file", "files"), a.open ? `<span class="o">${a.open} open</span>` : "",
+      a.parked ? `${a.parked} parked` : ""].filter(Boolean).join(" · "), "var(--rule-strong)",
+      a.last_accessed ? short(fromTs(a.last_accessed)) : "")).join("");
 }
 
 function pjSelect(id, focus) {
-  PJ.sel = narrow.matches && PJ.sel === id ? null : id;
+  const wasPanel = PJ.panel || PJ.clean;
+  PJ.panel = null; PJ.clean = null; PJ.done = null;
+  PJ.sel = narrow.matches && PJ.sel === id && !wasPanel ? null : id;
   PJ.editing = null; PJ.removing = null;
   PJ.launch = PJ.sel === ADHOC_NEW ? { id: ADHOC_NEW, prompt: "" } : null;
   if (PJ.sel === ADHOC_NEW) NS = { ctx: ADHOC, id: "", wt: "", touched: false };
@@ -1496,10 +1535,26 @@ function pjSelect(id, focus) {
   if (focus) $("pj-list").querySelector(`.pj-row[data-id="${CSS.escape(id)}"]`)?.focus();
 }
 
+// New project and Clean up take the detail, with a title and ✕, like New session.
+function pjPanelDetail() {
+  const list = $("pj-list"), only = PJ.clean?.only && PJ.data.projects.find((p) => p.id === PJ.clean.only);
+  PJD.hidden = false; PJD.dataset.id = "";
+  PJD.style.setProperty("--line", "var(--accent)");
+  if (narrow.matches) (list.querySelector(".pj-rows") || list).before(PJD);
+  const title = PJ.clean ? (only ? `Clean up <span class="in">${esc(only.label)}</span>` : "Clean up") : "New project";
+  PJD.innerHTML = `<div class="lf-head"><h1>${title}</h1>
+      <button class="btn icon" type="button" data-ns="close" aria-label="Close" title="Close (Esc)">✕</button></div>
+    ${PJ.clean ? `<form class="newsess flat" id="pj-clean" aria-label="Clean up worktrees" autocomplete="off"></form>`
+      : `<form class="newsess flat" id="pj-new" aria-label="New project" autocomplete="off"></form>`}`;
+  PJD.querySelector("[data-ns=close]").onclick = PJ.clean ? pjCloseClean : pjClosePanel;
+  PJ.clean ? pjRenderClean() : pjRenderPanel();
+}
+
 function pjRenderDetail() {
   const list = $("pj-list"), p = PJ.data?.projects.find((x) => x.id === PJ.sel);
   const folder = PJ.sel?.startsWith("adhoc:") && PJ.data?.adhoc.find((a) => "adhoc:" + a.path === PJ.sel);
   if (list.contains(PJD)) list.after(PJD);
+  if (PJ.data && (PJ.panel || PJ.clean)) { pjPanelDetail(); return; }
   PJD.hidden = !p && !folder && PJ.sel !== ADHOC_NEW;
   if (PJD.hidden) { PJD.innerHTML = ""; return; }
   if (narrow.matches) list.querySelector(`.pj-row[data-id="${CSS.escape(PJ.sel)}"]`)?.parentElement.append(PJD);
@@ -1522,8 +1577,7 @@ function pjRenderDetail() {
     body = `<p class="empty-line">Not cloned yet: run <code>code</code> once in a terminal to clone it.</p>`;
   } else if (main) {
     const i = wtInfo(p, main);
-    body = `<p class="pj-main">Works in its folder, on <b>${esc(main.branch || "its branch")}</b>
-      <span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span></p>`;
+    body = `<p class="pj-main">Works in its folder, on <b>${esc(main.branch || "its branch")}</b> ${chipsHtml(i)}</p>`;
   } else if (!p.worktrees.length) {
     body = `<p class="empty-line">No worktrees yet: New session creates one for a branch.</p>`;
   } else {
@@ -1533,7 +1587,6 @@ function pjRenderDetail() {
   }
   if (PJ.launch?.id === p.id) {
     PJD.innerHTML = `
-      <div class="sign"><span class="bullet"></span>${esc(p.context)}${team ? `<span class="sub">· team</span>` : ""}</div>
       <div class="lf-head"><h1>New session <span class="in">in ${esc(p.label)}</span></h1>
         <button class="btn icon" type="button" data-ns="close" aria-label="Close" title="Close (Esc)">✕</button></div>
       ${body}`;
@@ -1542,8 +1595,7 @@ function pjRenderDetail() {
     return;
   }
   PJD.innerHTML = `
-    <div class="sign"><span class="bullet"></span>${esc(p.context)}${team ? `<span class="sub">· team</span>` : ""}</div>
-    <h1>${esc(p.label)} <code class="id">${esc(p.id)}</code></h1>
+    <h1 class="pj-h1"><span class="dot" aria-hidden="true"></span>${esc(p.label)} <code class="id">${esc(p.id)}</code>${team ? ` <span class="tag" title="A team project: it changes by PR to the launcher's config/projects.conf">team</span>` : ""}</h1>
     <div class="facts">${facts}</div>
     <div class="actions">
       ${ST?.can_launch ? `<button class="btn primary" type="button" data-pa="session" ${p.cloned ? "" : "disabled"}>New session</button>` : ""}
@@ -1560,24 +1612,28 @@ function pjRenderDetail() {
   lfWire();
 }
 
-// The ad-hoc tab's detail: the form for a new ad-hoc session, or a folder and how to make it a project.
+// The ad-hoc section's detail: the form for a new ad-hoc session, or a folder: where its sessions
+// are, and how to make it a project.
 function adhocDetail(a) {
   PJD.dataset.id = "";
   PJD.style.setProperty("--line", a ? "var(--rule-strong)" : "var(--accent)");
   PJD.innerHTML = a ? `
-    <div class="sign"><span class="bullet"></span>ad-hoc</div>
-    <h1>${esc(a.name)}</h1>
-    <div class="facts"><span class="path">${esc(tilde(a.path))}</span><span>${a.files} file${a.files === 1 ? "" : "s"}</span>
-      ${a.last_accessed ? `<span>used ${ago(fromTs(a.last_accessed))}</span>` : ""}
-      ${a.open ? `<span><b>${a.open} open</b></span>` : ""}${a.parked ? `<span>${a.parked} parked</span>` : ""}</div>
-    <div class="actions"><button class="btn" type="button" data-pa="promote" ${a.open ? "disabled" : ""}>Make it a project…</button></div>
-    <p class="empty-line">${a.open ? "A Claude session is open here: park it first to make it a project." : "Git there, moved to ~/code/&lt;context&gt;/&lt;name&gt;; its conversations and parked cards move with it."}</p>
+    <h1 class="pj-h1"><span class="dot" aria-hidden="true"></span>${esc(adhocName(a))} <span class="tag">ad-hoc</span></h1>
+    <div class="facts">${adhocMade(a) ? `<span>made ${esc(adhocMade(a))}</span>` : ""}<span class="path">${esc(tilde(a.path))}</span>
+      <span>${plural(a.files, "file", "files")}</span>${a.last_accessed ? `<span>used ${ago(fromTs(a.last_accessed))}</span>` : ""}</div>
+    <div class="actions">
+      ${a.open ? `<button class="btn primary" type="button" data-pa="ah-open">Go to the open session</button>` : ""}
+      ${a.parked ? `<button class="btn ${a.open ? "" : "primary"}" type="button" data-pa="ah-parked">${a.parked === 1 ? "See its parked session" : `See its ${a.parked} parked sessions`}</button>` : ""}
+      <button class="btn" type="button" data-pa="promote" ${a.open ? "disabled" : ""}>Make it a project…</button></div>
+    <p class="empty-line">${a.open ? "Make it a project once its session is parked: the card moves with the folder."
+      : "Make it a project: git there, the folder moves to ~/code/&lt;context&gt;/&lt;name&gt;, and its conversations and parked sessions move with it."}</p>
     <p class="note" role="status" aria-live="polite"></p>`
-  : `<div class="sign"><span class="bullet"></span>ad-hoc</div>
-    <h1>New ad-hoc session</h1>
-    <p class="empty-line">A dated scratch folder, no git, in the launcher's ad-hoc directory. Later it can become a project.</p>
+  : `<div class="lf-head"><h1>New ad-hoc session</h1></div>
+    <p class="empty-line">A dated scratch folder, no git. Later it can become a project.</p>
     ${lfHtml(null)}`;
   PJD.querySelector("[data-pa=promote]")?.addEventListener("click", () => { PJ.adhoc = a.path; pjOpenPanel("adhoc"); });
+  PJD.querySelector("[data-pa=ah-open]")?.addEventListener("click", () => { location.hash = ""; });
+  PJD.querySelector("[data-pa=ah-parked]")?.addEventListener("click", () => { query = a.path; location.hash = ""; });
   lfWire();
 }
 
@@ -1586,8 +1642,8 @@ function wtRow(p, w, i) {
   const can = w.branch && w.branch !== "(detached)";
   return `<li class="wt" data-path="${esc(w.path)}">
     <span class="br" title="${esc(tilde(w.path))}">${esc(w.branch || "(no branch)")}</span>
-    <span class="st-chips">${i.chips.map(([k, t, title]) => `<span class="sc ${k}" title="${esc(title)}">${esc(t)}</span>`).join("")}</span>
-    <span class="ago" title="Last session here">${w.last_accessed ? short(fromTs(w.last_accessed)) : ""}</span>
+    ${chipsHtml(i)}
+    <span class="ago" title="Last used">${w.last_accessed ? short(fromTs(w.last_accessed)) : ""}</span>
     <span class="acts">
       <button class="btn small" type="button" data-pa="wt-session" ${can ? "" : "disabled"}>Session</button>
       ${i.removable ? `<details class="more"><summary class="btn small" aria-label="More for ${esc(w.branch || "this worktree")}">⋯</summary><div class="menu">
@@ -1598,32 +1654,30 @@ function wtRow(p, w, i) {
 }
 
 // ---------------------------------------------- Clean up: every worktree that loses nothing, at once
-function pjOpenClean(only) { PJ.clean = { only }; pjRenderClean(); pjRender(); $("pj-clean").scrollIntoView({ block: "nearest" }); }
-function pjCloseClean() { PJ.clean = null; pjRenderClean(); pjRender(); }
+function pjOpenClean(only) { PJ.clean = { only }; PJ.panel = null; PJ.launch = null; pjRender(); PJD.scrollIntoView({ block: "nearest" }); }
+function pjCloseClean() { PJ.clean = null; pjRender(); }
 
 function pjRenderClean() {
   const form = $("pj-clean");
-  form.hidden = !PJ.clean;
-  if (!PJ.clean) { form.innerHTML = ""; return; }
-  const items = safeList(PJ.clean.only), only = PJ.clean.only && PJ.data.projects.find((p) => p.id === PJ.clean.only);
+  if (!form || !PJ.clean) return;
+  const items = safeList(PJ.clean.only);
   const parked = items.reduce((n, x) => n + (x.w.parked || 0), 0);
   form.innerHTML = items.length ? `
-    <div class="field wide"><span>Worktrees that lose nothing if removed${only ? ` in ${esc(only.label)}` : ""}
-        <small>(no uncommitted or unpushed work; merged, or no commits of their own; no session open)</small></span>
-      <div class="picks">${items.map(({ p, w }) => `<label class="pick">
-          <input type="checkbox" data-path="${esc(w.path)}" checked>
-          <b>${esc(p.label)} · ${esc(w.branch || "(no branch)")}</b>
-          <small>${w.status?.merged ? `merged into ${esc(p.base)}` : "no commits of its own"} · ${esc(tilde(w.path))}${w.last_accessed ? ` · used ${ago(fromTs(w.last_accessed))}` : ""}</small>
-          <span class="st-chips">${w.parked ? `<span class="sc" title="Its parked cards would no longer resume">${w.parked} parked</span>` : ""}</span></label>`).join("")}</div></div>
+    <p class="wide lf-sub">${plural(items.length, "worktree loses", "worktrees lose")} nothing if removed: no unsaved work, merged or no commits of their own, no session open.</p>
+    <div class="picks wide">${items.map(({ p, w }) => `<label class="pick">
+        <input type="checkbox" data-path="${esc(w.path)}" checked>
+        <b>${esc(w.branch || "(no branch)")} <span class="in">· ${esc(p.label)}</span></b>
+        <small>${w.status?.merged ? `merged into ${esc(p.base)}` : "no commits of its own"} · ${esc(tilde(w.path))}${w.last_accessed ? ` · used ${ago(fromTs(w.last_accessed))}` : ""}</small>
+        <span class="st-chips">${w.parked ? `<span class="sc" title="Its parked sessions would no longer resume">${w.parked} parked</span>` : ""}</span></label>`).join("")}</div>
     <label class="inline wide"><input type="checkbox" name="branches" checked> Delete their branches too <small>(only the merged ones; the others stay)</small></label>
-    ${parked ? `<p class="note wide">${parked} parked card${parked > 1 ? "s" : ""} in these folders would no longer resume.</p>` : ""}
-    <div class="ns-acts wide"><button class="btn small danger armed" type="submit">Remove ${items.length} worktree${items.length > 1 ? "s" : ""}</button>
-      <button class="btn small" type="button" data-pc="cancel">Cancel</button>
-      <span class="note" id="pc-note" role="status" aria-live="polite"></span></div>`
-    : `<p class="note wide">Nothing to clean up: every worktree has work of its own.</p>
-      <div class="ns-acts wide"><button class="btn small" type="button" data-pc="cancel">Close</button></div>`;
+    ${parked ? `<p class="lf-open wide">${plural(parked, "parked session", "parked sessions")} in these folders would no longer resume.</p>` : ""}
+    <div class="wide lf-bar"><span class="note" id="pc-note" role="status" aria-live="polite"></span>
+      <button class="btn" type="button" data-pc="cancel">Cancel</button>
+      <button class="btn danger armed" type="submit">Remove ${plural(items.length, "worktree", "worktrees")}</button></div>`
+    : `<p class="wide lf-sub">Nothing to clean up: every worktree has work of its own.</p>
+      <div class="wide lf-bar"><button class="btn" type="button" data-pc="cancel">Close</button></div>`;
   const go = form.querySelector("[type=submit]");
-  const count = () => { const n = form.querySelectorAll("[data-path]:checked").length; if (go) { go.textContent = `Remove ${n} worktree${n === 1 ? "" : "s"}`; go.disabled = !n; } };
+  const count = () => { const n = form.querySelectorAll("[data-path]:checked").length; if (go) { go.textContent = `Remove ${plural(n, "worktree", "worktrees")}`; go.disabled = !n; } };
   form.querySelectorAll("[data-path]").forEach((c) => (c.onchange = count));
   form.querySelector("[data-pc=cancel]").onclick = pjCloseClean;
   form.onkeydown = (e) => { if (e.key === "Escape") { e.preventDefault(); pjCloseClean(); } };
@@ -1639,11 +1693,12 @@ function pjRenderClean() {
       try { const r = await post("api/project-worktree-remove", { path, delete_branch: branches }); done++; if (r.branch_deleted) nBranches++; }
       catch (err) { failed.push(`${tilde(path)}: ${err.message}`); }
     }
-    PJ.clean = null; pjRenderClean();
+    PJ.clean = null;
     const top = $("pj-note");
     top.className = failed.length ? "note bad" : "note";
-    top.textContent = `Removed ${done} worktree${done === 1 ? "" : "s"}${nBranches ? ` and ${nBranches} branch${nBranches === 1 ? "" : "es"}` : ""}.${failed.length ? ` Could not remove: ${failed.join("; ")}` : ""}`;
+    top.textContent = `Removed ${plural(done, "worktree", "worktrees")}${nBranches ? ` and ${plural(nBranches, "branch", "branches")}` : ""}.${failed.length ? ` Could not remove: ${failed.join("; ")}` : ""}`;
     await pjLoad();
+    pjRender();
   };
 }
 
@@ -1665,17 +1720,17 @@ function wtConfirm(p, w) {
 
 function pjEditForm(p) {
   return `<form class="newsess flat" data-edit="${esc(p.id)}" autocomplete="off">
-    <label>Name<input name="label" value="${esc(p.label)}" required></label>
-    <label>Context<input name="context" list="pj-ctxs" value="${esc(p.context)}" spellcheck="false" required></label>
-    <label>Kind<select name="type">${kindOptions(p.type)}</select></label>
-    <div class="ns-acts wide"><button class="btn small primary" type="submit">Save</button>
-      <button class="btn small" type="button" data-pa="edit-cancel">Cancel</button></div>
+    <label>${lbl("Name")}<input name="label" value="${esc(p.label)}" required></label>
+    <label>${lbl("Context")}<input name="context" list="pj-ctxs" value="${esc(p.context)}" spellcheck="false" required></label>
+    <label>${lbl("Works in")}<select name="type">${kindOptions(p.type)}</select></label>
+    <div class="wide lf-bar"><button class="btn" type="button" data-pa="edit-cancel">Cancel</button>
+      <button class="btn primary" type="submit">Save</button></div>
   </form>`;
 }
 
 // The launch form for cwd's project (exact: that worktree, not a new branch).
 function pjStartSession(cwd, exact) {
-  if (PJ.panel) { PJ.panel = null; PJ.done = null; pjRenderPanel(); }
+  PJ.panel = null; PJ.clean = null; PJ.done = null;
   PJ.pending = { cwd, exact };
   pjApplyPending();
 }
@@ -1696,8 +1751,8 @@ async function pjFetch(ids, btn) {
 
 PJD.addEventListener("click", async (e) => {
   const b = e.target.closest("[data-pa]");
-  if (!b) return;
   const p = PJ.data.projects.find((x) => x.id === PJD.dataset.id);
+  if (!b || !p) return;
   const row = b.closest(".wt"), w = row && p.worktrees.find((x) => x.path === row.dataset.path);
   const note = PJD.querySelector(":scope > .note");
   const fail = (err) => { note.className = "note bad"; note.textContent = err.message; b.disabled = false; };
@@ -1748,15 +1803,20 @@ narrow.addEventListener("change", () => { if (VIEW === "projects" && PJ.data) pj
 // ---------------------------------------------- New project: create, clone, add a folder, from ad-hoc
 const PJ_TABS = [["create", "Create new"], ["clone", "Clone from GitHub"], ["add", "Add a folder"], ["adhoc", "From an ad-hoc folder"]];
 
-function pjClosePanel() { PJ.panel = null; PJ.done = null; pjRenderPanel(); pjRender(); }
-function pjOpenPanel(tab) { PJ.panel = tab; PJ.done = null; pjRenderPanel(); pjRender(); $("pj-new").querySelector("input:not([type=checkbox]):not([type=radio])")?.focus(); }
+function pjClosePanel() { PJ.panel = null; PJ.done = null; pjRender(); }
+function pjOpenPanel(tab) {
+  PJ.panel = tab; PJ.clean = null; PJ.done = null; PJ.launch = null; PJ.editing = null;
+  pjRender();
+  PJD.scrollIntoView({ block: "nearest" });
+  $("pj-new")?.querySelector("input:not([type=checkbox]):not([type=radio])")?.focus();
+}
 
 // Context, kind and the GitHub row: the same in Create and From ad-hoc.
 function pjCommonFields(withGithub) {
   const ctx = lsGet("valet-pj-ctx") || "personal";
-  return `<label>Context<input name="context" list="pj-ctxs" value="${esc(ctx)}" spellcheck="false" required></label>
-    <label>Kind<select name="type">${kindOptions("single")}</select></label>
-    ${withGithub ? `<div class="field wide"><span>GitHub</span><div class="ns-acts">
+  return `<label>${lbl("Context", "its group in the list")}<input name="context" list="pj-ctxs" value="${esc(ctx)}" spellcheck="false" required></label>
+    <label>${lbl("Works in")}<select name="type">${kindOptions("single")}</select></label>
+    ${withGithub ? `<div class="field wide">${lbl("GitHub")}<div class="ns-acts">
       <label class="inline"><input type="checkbox" name="gh" checked> Create a repo in</label>
       <input name="owner" value="${esc(pjOwner(ctx))}" aria-label="GitHub owner" placeholder="owner" spellcheck="false" style="width:16ch">
       <select name="vis" aria-label="Visibility" style="width:auto"><option value="private">private</option><option value="public">public</option></select>
@@ -1765,59 +1825,58 @@ function pjCommonFields(withGithub) {
 
 function pjRenderPanel() {
   const form = $("pj-new");
-  form.hidden = !PJ.panel;
-  if (!PJ.panel) { form.innerHTML = ""; return; }
+  if (!form || !PJ.panel) return;
   const tab = PJ.panel, adhoc = PJ.data?.adhoc || [];
-  const tabs = `<div class="field wide"><div class="chips" role="group" aria-label="How">${PJ_TABS.map(([k, l]) =>
-    `<button type="button" class="chip" data-tab="${k}" aria-pressed="${k === tab}">${l}${k === "adhoc" && adhoc.length ? ` <small>${adhoc.length}</small>` : ""}</button>`).join("")}</div></div>`;
+  const tabs = `<div class="wide"><div class="seg pj-how" role="group" aria-label="How">${PJ_TABS.map(([k, l]) =>
+    `<button type="button" data-tab="${k}" aria-pressed="${k === tab}">${l}${k === "adhoc" && adhoc.length ? `<b>${adhoc.length}</b>` : ""}</button>`).join("")}</div></div>`;
   let body = "", submit = "";
   if (tab === "create") {
-    body = `<label>Name<input name="name" placeholder="e.g. bank-reader: the folder and the repo" spellcheck="false" required></label>
+    body = `<label>${lbl("Name", "the folder and the repo")}<input name="name" placeholder="e.g. bank-reader" spellcheck="false" required></label>
       ${pjCommonFields(true)}
-      <details class="wide"><summary>Display name, folder</summary>
-        <label>Display name<input name="label" placeholder="the name"></label>
-        <label>Folder<input name="path" placeholder="~/code/<context>/<name>" spellcheck="false"></label></details>`;
+      <details class="wide pj-opts"><summary>Display name and folder</summary>
+        <label>${lbl("Display name")}<input name="label" placeholder="the name"></label>
+        <label>${lbl("Folder")}<input name="path" placeholder="~/code/<context>/<name>" spellcheck="false"></label></details>`;
     submit = "Create project";
   } else if (tab === "clone") {
-    body = `<label class="wide">Repository<input name="repo" placeholder="owner/repo, or a git URL" spellcheck="false" required></label>
+    body = `<label class="wide">${lbl("Repository")}<input name="repo" placeholder="owner/repo, or a git URL" spellcheck="false" required></label>
       ${pjCommonFields(false)}
-      <details class="wide"><summary>Display name, id, folder</summary>
-        <label>Display name<input name="label" placeholder="the repo's name"></label>
-        <label>Id<input name="id" placeholder="from the repo" spellcheck="false"></label>
-        <label>Folder<input name="path" placeholder="~/code/<context>/<repo>" spellcheck="false"></label></details>`;
+      <details class="wide pj-opts"><summary>Display name, id and folder</summary>
+        <label>${lbl("Display name")}<input name="label" placeholder="the repo's name"></label>
+        <label>${lbl("Id")}<input name="id" placeholder="from the repo" spellcheck="false"></label>
+        <label>${lbl("Folder")}<input name="path" placeholder="~/code/<context>/<repo>" spellcheck="false"></label></details>`;
     submit = "Clone";
   } else if (tab === "add") {
     const scan = PJ.scan;
-    body = `<div class="field wide"><span>Repos on this machine that are not in the list <small>(~/code and the team's repo folder)</small></span>
+    body = `<div class="field wide">${lbl("Repos on this machine that are not in the list", "~/code and the team's repo folder")}
         ${scan === null ? `<small>Looking…</small>` : scan.error ? `<small class="bad">${esc(scan.error)}</small>`
           : !scan.repos.length ? `<small>None: every repo found is already a project.</small>`
           : `<div class="picks">${scan.repos.map((x) => `<div class="pick" data-path="${esc(x.path)}">
               <b>${esc(x.name)}</b><small>${esc(tilde(x.path))}${x.owner ? ` · github.com/${esc(x.owner)}` : x.remote ? "" : " · no remote"}${x.last_commit ? ` · last commit ${ago(fromTs(x.last_commit))}` : ""}</small>
               <span class="acts"><button class="btn small" type="button" data-add="${esc(x.path)}">Add to ${esc(x.context)}</button></span></div>`).join("")}</div>`}</div>
-      <label class="wide">Or a folder <small>(an existing clone)</small><input name="path" placeholder="~/code/personal/my-repo" spellcheck="false"></label>
+      <label class="wide">${lbl("Or a folder", "an existing clone")}<input name="path" placeholder="~/code/personal/my-repo" spellcheck="false"></label>
       ${pjCommonFields(false)}`;
     submit = "Add folder";
   } else {
     const sel = adhoc.find((a) => a.path === PJ.adhoc);
-    body = `<div class="field wide"><span>Ad-hoc folders, newest first <small>(git init there, moved to ~/code/&lt;context&gt;/&lt;name&gt;; its conversations and parked cards move with it)</small></span>
+    body = `<div class="field wide">${lbl("Ad-hoc folder", "git there, moved to ~/code/&lt;context&gt;/&lt;name&gt;; its conversations and parked sessions move with it")}
         ${adhoc.length ? `<div class="picks" role="radiogroup">${adhoc.slice(0, 30).map((a) => `<label class="pick${a.open ? " off" : ""}">
             <input type="radio" name="pick" value="${esc(a.path)}" ${a.path === PJ.adhoc ? "checked" : ""}>
-            <b>${esc(a.name)}</b><small>${a.files} file${a.files === 1 ? "" : "s"}${a.last_accessed ? ` · ${ago(fromTs(a.last_accessed))}` : ""}</small>
+            <b>${esc(adhocName(a))}</b><small>${adhocMade(a) ? `made ${esc(adhocMade(a))} · ` : ""}${plural(a.files, "file", "files")}${a.last_accessed ? ` · used ${ago(fromTs(a.last_accessed))}` : ""}</small>
             <span class="st-chips">${a.open ? `<span class="sc live">${a.open} open</span>` : ""}${a.parked ? `<span class="sc">${a.parked} parked</span>` : ""}</span></label>`).join("")}</div>`
           : `<small>No ad-hoc folders.</small>`}</div>
-      ${sel ? `<label>Name<input name="name" value="${esc(sel.name.replace(/^\d{4}-\d{2}-\d{2}-?/, "") || "")}" spellcheck="false" required></label>
+      ${sel ? `<label>${lbl("Name", "the folder and the repo")}<input name="name" value="${esc(adhocName(sel) === "unnamed" ? "" : adhocName(sel))}" spellcheck="false" required></label>
         ${pjCommonFields(true)}` : ""}`;
     submit = "Make it a project";
   }
   // Done: just what happened and where to go next; "Another one" brings the form back.
   form.innerHTML = PJ.done ? `<div class="done" role="status"><span class="ok">✓</span> ${PJ.done.html}</div>
-    <div class="ns-acts wide"><button class="btn small primary" type="button" data-pn="go">Start a session</button>
-      <button class="btn small" type="button" data-pn="again">Another one</button>
-      <button class="btn small" type="button" data-pn="cancel">Close</button></div>`
+    <div class="wide lf-bar"><button class="btn" type="button" data-pn="cancel">Close</button>
+      <button class="btn" type="button" data-pn="again">Another one</button>
+      <button class="btn primary" type="button" data-pn="go">Start a session</button></div>`
     : `${tabs}${body}<p class="preview wide" id="pn-preview"></p>
-    <div class="ns-acts wide"><button class="btn small primary" type="submit" ${tab === "adhoc" && !PJ.adhoc ? "disabled" : ""}>${submit}</button>
-      <button class="btn small" type="button" data-pn="cancel">Cancel</button>
-      <span class="note" id="pn-note" role="status" aria-live="polite"></span></div>`;
+    <div class="wide lf-bar"><span class="note" id="pn-note" role="status" aria-live="polite"></span>
+      <button class="btn" type="button" data-pn="cancel">Cancel</button>
+      <button class="btn primary" type="submit" ${tab === "adhoc" && !PJ.adhoc ? "disabled" : ""}>${submit}</button></div>`;
   const f = form.elements;
   form.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { PJ.panel = b.dataset.tab; PJ.done = null; pjRenderPanel(); }));
   form.querySelector("[data-pn=cancel]").onclick = pjClosePanel;
