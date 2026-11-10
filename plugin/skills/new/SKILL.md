@@ -8,7 +8,7 @@ description: Start a new Claude Code session in a project, in a herdr tab, with 
 `/valet:new <id>[@<branch>] [goal]`, e.g. `/valet:new exp-track@fix-tz fix the log timezone`.
 
 ```bash
-herdr-valet new <id>[@<branch>] [--model <model>] [--prompt "<goal>"]
+herdr-valet new <id>[@<branch>] [--as <profile>] [--model <model>] [--prompt "<goal>"]
 ```
 
 - **`<id>`** is the project's id in the launcher's registry, not the folder name. When the user
@@ -20,6 +20,10 @@ herdr-valet new <id>[@<branch>] [--model <model>] [--prompt "<goal>"]
   - Without one, it opens the most recent worktree; for a `direct` project, its clone.
   - A `direct` project takes no `@<branch>`.
 - **`adhoc:[name]`** instead of an id: a new dated scratch folder, no git.
+- **`--as <profile>`:** required when the launcher takes a profile (`launch_command` with
+  `{profile}`; the error says "pick a profile"). The profiles are in `herdr-valet config`
+  (`profiles`). Use the one the user named; otherwise ask, never guess: a profile can be an
+  account (work vs personal).
 - **`--prompt`:** the goal, in the user's words. Without one, the session starts and waits.
 - **`--model`:** only when the user asked (`opus`, `opusplan`, `sonnet`, `haiku`). Without it,
   Claude's default.

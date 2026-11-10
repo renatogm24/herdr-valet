@@ -132,7 +132,8 @@ DEFAULTS = {
     #   "adhoc:[name]", a dated scratch directory) and prints {"path", "branch", "created",
     #   "project"}; its stderr is the error the page shows. Run by valet.
     # launch_command starts Claude in a new herdr tab in that directory: {path}, {model}, {prompt},
-    #   {plugins} (each already shell-quoted; empty when not chosen).
+    #   {plugins} (each already shell-quoted; empty when not chosen), and {profile} if you use it:
+    #   with {profile} in it (and `profiles` set), New session asks which profile to start with.
     "projects_command": "",
     "prepare_command": "",
     "launch_command": "",
@@ -1202,14 +1203,26 @@ def reopen(session_id: str, fork: bool = False) -> dict:
 TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]+(@[A-Za-z0-9._/-]+)?|adhoc:[^/\n]{0,60})$")
 
 
-def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "") -> dict:
+def launch_profiles() -> bool:
+    """launch_command takes {profile}: New session then asks which profile (account) to start with."""
+    return "{profile}" in CONF["launch_command"] and bool(profiles())
+
+
+def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "", profile: str = "") -> dict:
     """A new Claude session from the page: prepare_command finds or creates the directory (a branch's
     worktree), then a new herdr tab there runs launch_command. The tab goes in the workspace that
-    already holds that repository, or in a new one named after the project."""
+    already holds that repository, or in a new one named after the project. When launch_command takes
+    {profile}, one is required: a new session has no profile of its own to fall back on."""
     if not TARGET_RE.match(target or ""):
         raise ValueError("pick a project (and a branch, if it uses worktrees)")
     if not can_launch():
         raise ValueError("new sessions are off: set projects_command, prepare_command and launch_command")
+    if launch_profiles():
+        if not profile:
+            raise ValueError("pick a profile")
+        check_profile(profile)
+    elif profile:
+        raise ValueError("launch_command takes no {profile}")
     if not herdr_running():
         raise HerdrDown("start herdr first")
     prep = json.loads(_run_launcher(CONF["prepare_command"].format(target=shlex.quote(target)), 120))
@@ -1219,9 +1232,11 @@ def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "
     project = prep.get("project") or target.split("@")[0]
     tab_label = prep.get("branch") or Path(path).name
     cmd = CONF["launch_command"].format(**{k: shlex.quote(v) for k, v in
-                                           (("path", path), ("model", model), ("prompt", prompt), ("plugins", plugins))})
+                                           (("path", path), ("model", model), ("prompt", prompt), ("plugins", plugins),
+                                            ("profile", profile))})
     ws_id, pane = open_tab_in_repo(path, tab_label, project, cmd)
-    log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})")
+    log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})"
+        + (f" as {profile}" if profile else ""))
     return {"workspace": ws_id, "pane": pane, "path": path, "branch": prep.get("branch"),
             "created": bool(prep.get("created"))}
 
@@ -3461,6 +3476,7 @@ def main() -> int:
     nw.add_argument("--model", default="")
     nw.add_argument("--prompt", default="", help="its first message")
     nw.add_argument("--plugins", default="")
+    nw.add_argument("--as", dest="profile", default="", help="the profile, when launch_command takes {profile}")
     args = ap.parse_args()
 
     if args.cmd == "search":
@@ -3480,7 +3496,7 @@ def main() -> int:
         return 0
     if args.cmd == "new":
         try:
-            r = new_session(args.target, args.model, args.prompt, args.plugins)
+            r = new_session(args.target, args.model, args.prompt, args.plugins, args.profile)
         except HerdrDown as e:
             print(f"herdr is not running: {e}", file=sys.stderr)
             return 1
