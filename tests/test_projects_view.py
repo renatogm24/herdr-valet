@@ -13,7 +13,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-TMP = Path(tempfile.mkdtemp())
+# Resolved: on macOS the temp dir is /var/folders/…, a symlink to /private/var/folders/…, and
+# project_promote resolves its path (Claude records the real cwd), so unresolved paths never match.
+TMP = Path(tempfile.mkdtemp()).resolve()
 os.environ["XDG_DATA_HOME"] = str(TMP)
 os.environ["HERDR_VALET_CONFIG"] = str(TMP / "missing.toml")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
