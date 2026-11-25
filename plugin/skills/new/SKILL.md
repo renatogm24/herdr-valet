@@ -8,7 +8,7 @@ description: Start a new Claude Code session in a project, in a herdr tab, with 
 `/valet:new <id>[@<branch>] [goal]`, e.g. `/valet:new exp-track@fix-tz fix the log timezone`.
 
 ```bash
-herdr-valet new <id>[@<branch>] [--as <profile>] [--model <model>] [--prompt "<goal>"]
+herdr-valet new <id>[@<branch>] [--as <profile>] [--model <model>] [--effort <level>] [--prompt "<goal>"]
 ```
 
 - **`<id>`** is the project's id in the launcher's registry, not the folder name. When the user
@@ -27,6 +27,9 @@ herdr-valet new <id>[@<branch>] [--as <profile>] [--model <model>] [--prompt "<g
 - **`--prompt`:** the goal, in the user's words. Without one, the session starts and waits.
 - **`--model`:** only when the user asked (`opus`, `opusplan`, `sonnet`, `haiku`). Without it,
   Claude's default.
+- **`--effort`:** only when the user asked (`low`, `medium`, `high`, `xhigh`, `max`). Without it,
+  the default of that model. It needs `{effort}` in `launch_command`; if valet says the launcher
+  takes none, say so and do not start the session at another level.
 - **Where it opens:** in the herdr workspace that already holds that repository, or in a new one
   named after the project. This session is not touched.
 

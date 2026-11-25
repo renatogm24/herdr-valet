@@ -95,6 +95,8 @@
 #   in the same repository, or in a new one named after the project. With {profile} in it too
 #   (and `profiles` set), New session asks which profile to start with and requires one: for a
 #   launcher per account, e.g. "my-launch {profile} {path} …".
+#   {effort} is the level `herdr-valet new --effort` asked for (low, medium, high, xhigh, max; empty
+#   when not asked), for a launcher that passes it on as `claude --effort`.
 # projects_command = "my-launcher projects --json"
 # prepare_command = "my-launcher prepare {target} --json"
 # launch_command = "my-launcher launch {path} --model {model} --prompt {prompt} --plugins {plugins}"
