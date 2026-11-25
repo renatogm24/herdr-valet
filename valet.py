@@ -134,6 +134,8 @@ DEFAULTS = {
     # launch_command starts Claude in a new herdr tab in that directory: {path}, {model}, {prompt},
     #   {plugins} (each already shell-quoted; empty when not chosen), and {profile} if you use it:
     #   with {profile} in it (and `profiles` set), New session asks which profile to start with.
+    #   {effort} is the effort level `herdr-valet new --effort` asked for (low, medium, high, xhigh,
+    #   max; empty when not asked), for a launcher that passes it on as `claude --effort`.
     "projects_command": "",
     "prepare_command": "",
     "launch_command": "",
@@ -1208,11 +1210,16 @@ def launch_profiles() -> bool:
     return "{profile}" in CONF["launch_command"] and bool(profiles())
 
 
-def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "", profile: str = "") -> dict:
+EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
+def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "", profile: str = "",
+                effort: str = "") -> dict:
     """A new Claude session from the page: prepare_command finds or creates the directory (a branch's
     worktree), then a new herdr tab there runs launch_command. The tab goes in the workspace that
     already holds that repository, or in a new one named after the project. When launch_command takes
-    {profile}, one is required: a new session has no profile of its own to fall back on."""
+    {profile}, one is required: a new session has no profile of its own to fall back on. An effort
+    level needs {effort} in launch_command: without it the level would be dropped without a word."""
     if not TARGET_RE.match(target or ""):
         raise ValueError("pick a project (and a branch, if it uses worktrees)")
     if not can_launch():
@@ -1223,6 +1230,11 @@ def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "
         check_profile(profile)
     elif profile:
         raise ValueError("launch_command takes no {profile}")
+    if effort:
+        if effort not in EFFORTS:
+            raise ValueError(f"effort is one of: {', '.join(EFFORTS)}")
+        if "{effort}" not in CONF["launch_command"]:
+            raise ValueError("launch_command takes no {effort}")
     if not herdr_running():
         raise HerdrDown("start herdr first")
     prep = json.loads(_run_launcher(CONF["prepare_command"].format(target=shlex.quote(target)), 120))
@@ -1233,10 +1245,10 @@ def new_session(target: str, model: str = "", prompt: str = "", plugins: str = "
     tab_label = prep.get("branch") or Path(path).name
     cmd = CONF["launch_command"].format(**{k: shlex.quote(v) for k, v in
                                            (("path", path), ("model", model), ("prompt", prompt), ("plugins", plugins),
-                                            ("profile", profile))})
+                                            ("profile", profile), ("effort", effort))})
     ws_id, pane = open_tab_in_repo(path, tab_label, project, cmd)
     log(f"new session {target} in {ws_id} ({path}{', new worktree' if prep.get('created') else ''})"
-        + (f" as {profile}" if profile else ""))
+        + (f" as {profile}" if profile else "") + (f", effort {effort}" if effort else ""))
     return {"workspace": ws_id, "pane": pane, "path": path, "branch": prep.get("branch"),
             "created": bool(prep.get("created"))}
 
@@ -3482,6 +3494,8 @@ def main() -> int:
     nw.add_argument("--prompt", default="", help="its first message")
     nw.add_argument("--plugins", default="")
     nw.add_argument("--as", dest="profile", default="", help="the profile, when launch_command takes {profile}")
+    nw.add_argument("--effort", default="", choices=EFFORTS,
+                    help="the effort level, when launch_command takes {effort}")
     args = ap.parse_args()
 
     if args.cmd == "search":
@@ -3501,7 +3515,7 @@ def main() -> int:
         return 0
     if args.cmd == "new":
         try:
-            r = new_session(args.target, args.model, args.prompt, args.plugins, args.profile)
+            r = new_session(args.target, args.model, args.prompt, args.plugins, args.profile, args.effort)
         except HerdrDown as e:
             print(f"herdr is not running: {e}", file=sys.stderr)
             return 1

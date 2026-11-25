@@ -160,7 +160,7 @@ command; cards and config stay.
   resumed, open, or any Claude Code transcript, by the words in its title, summary, first message,
   project, directory or branch (accents ignored, every word must match), best and most recent first.
   No LLM; transcripts are indexed once and re-read only when they change (`data_dir/search/`).
-- `herdr-valet new <id[@branch]> [--model M] [--prompt TEXT] [--plugins SPEC]` is the page's New session
+- `herdr-valet new <id[@branch]> [--model M] [--effort LEVEL] [--prompt TEXT] [--plugins SPEC]` is the page's New session
   from the command line (needs the launcher commands).
 
 ### From inside Claude Code: the `valet` plugin

@@ -128,6 +128,25 @@ class NewSession(unittest.TestCase):
         run = next(c for c in h.calls if c[:2] == ("pane", "run"))
         self.assertEqual(run[3], f"my-launch 1 {WT} opus")
 
+    def test_effort_when_launch_command_takes_it(self):
+        valet.CONF["launch_command"] = "my-launch {path} {model} {prompt} {effort}"
+        h = valet.herdr = FakeHerdr({"w1": [str(REPO)]})
+        with self.assertRaisesRegex(ValueError, "effort is one of"):
+            valet.new_session("proj@feat/x", "opus", effort="huge; rm")
+        valet.new_session("proj@feat/x", "opus", effort="xhigh")
+        run = next(c for c in h.calls if c[:2] == ("pane", "run"))
+        self.assertEqual(run[3], f"my-launch {WT} opus '' xhigh")
+        # Not asked: the placeholder becomes an empty argument, so positional launchers keep their order.
+        h = valet.herdr = FakeHerdr({"w1": [str(REPO)]})
+        valet.new_session("proj@feat/x", "opus")
+        run = next(c for c in h.calls if c[:2] == ("pane", "run"))
+        self.assertEqual(run[3], f"my-launch {WT} opus '' ''")
+
+    def test_no_effort_without_it_in_launch_command(self):
+        valet.herdr = FakeHerdr({"w1": [str(REPO)]})
+        with self.assertRaisesRegex(ValueError, "no {effort}"):
+            valet.new_session("proj@feat/x", "opus", effort="xhigh")
+
     def test_no_profile_without_it_in_launch_command(self):
         valet.CONF["profiles"] = "gd:GD,1:GD1"
         self.assertFalse(valet.launch_profiles())
