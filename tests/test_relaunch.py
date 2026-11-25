@@ -69,6 +69,15 @@ class Hook(unittest.TestCase):
         for f in valet.RELAUNCH.glob("*") if valet.RELAUNCH.is_dir() else []:
             f.unlink()
 
+    def test_injected_prompts_pass_in_a_large_session(self):
+        # A background agent's result and a message from another session name ids the session
+        # never mentioned, but the user did not write them: never stopped.
+        transcript("h10", 400_000)
+        for prompt in ("<task-notification>\n<task-id>a1</task-id>\nPLATAPI-16060 and PROFILE-4133 done</task-notification>",
+                       "<cross-session-message from=\"x\">look at PLATAPI-14430</cross-session-message>"):
+            self.assertIsNone(valet.hook(event("h10", prompt)))
+        self.assertEqual(valet.hook(event("h10", "comencemos con el F-016"))["decision"], "block")
+
     def test_a_small_session_is_left_alone(self):
         transcript("h1", 50_000)
         self.assertIsNone(valet.hook(event("h1", "comencemos con el F-016")))
