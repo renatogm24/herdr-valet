@@ -2311,6 +2311,9 @@ NEW_WORK = re.compile(
 WORK_ID = re.compile(r"\b(?:[A-Z][A-Z0-9]{1,9}-\d+|[Ff]-?\d{2,4}|(?i:avit)\d{4,})\b")
 WORK_ID_STOP = {"utf", "sha", "iso", "tls", "http", "gpt", "rfc"}
 PASTED = re.compile(r"<pasted_content\b.*?</pasted_content>", re.S)
+# Prompts Claude Code delivers on its own (a background agent's result, a message from another
+# session): not the user's words, so the hook never stops them.
+SYSTEM_PROMPT_RE = re.compile(r"\s*<(?:task-notification|cross-session-message)\b")
 # Of a long transcript, the end is enough to know the context and the cache.
 TAIL_BYTES = 512 * 1024
 # What a handoff costs to write, on top of reading the context: about this many output tokens.
@@ -2490,6 +2493,8 @@ def hook(event: dict) -> dict | None:
     pane = os.environ.get("HERDR_PANE_ID")
     tr = Path(event["transcript_path"]) if event.get("transcript_path") else (transcript_path(sid) if sid else None)
     if not (sid and pane and tr and tr.is_file()):
+        return None
+    if SYSTEM_PROMPT_RE.match(prompt):
         return None
     state = _relaunch_state(sid)
     if PARK_HANDOFF_RE.fullmatch(prompt):
