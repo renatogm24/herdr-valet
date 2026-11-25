@@ -48,6 +48,7 @@ herdr-valet:
    plugins for that folder (checked as the repo declares them; the repo's MCPs are shown, not
    chosen), and opens Claude in a new tab of the workspace that already holds that repository.
    Errors from the launcher (a bad branch name, a repo not cloned) come back to the page.
+   With `{profile}` in `launch_command`, it also asks which of your `profiles` to start with.
 10. **Manages your projects (optional):** with `project_command` set, the **Projects** view lists
    every project with each worktree's git status. The status covers:
    - Uncommitted files, unpushed commits and commits ahead of the default branch.

@@ -931,11 +931,17 @@ function lfHtml(p) {
   // Model: the one picked here, else the worktree's saved one, else the project's, else Opus.
   const want = PJ.launch?.model || nsWorktree()?.model || p?.model || "opus";
   const models = MODELS.some(([v]) => v === want) ? MODELS : [...MODELS, [want, want]];
+  // Profile (launch_command takes {profile}): the one picked here, else the last used for this
+  // project. A project never started from here has none: you pick, so an account is never guessed.
+  const pf = ST?.launch_profiles ? (PJ.launch?.profile || lfSavedProfile(p)) : "";
+  const pfField = ST?.launch_profiles ? `<fieldset class="lf-model lf-profile"><legend class="lf-lbl">Profile</legend><div class="lf-seg">${ST.profiles.map((x) =>
+        `<label><input type="radio" name="profile" value="${esc(x.name)}" ${x.name === pf ? "checked" : ""}><span>${esc(x.label)}</span></label>`).join("")}</div></fieldset>` : "";
   return `<form class="newsess flat" id="new-panel" aria-label="New session" autocomplete="off">
     ${where}
     <label class="wide">${lbl("First message", "optional; empty, Claude waits for you")}
       <textarea name="prompt" placeholder="e.g. Fix the timezone in the bank-statement logs; the test is still missing">${esc(PJ.launch?.prompt || "")}</textarea></label>
     <div class="wide lf-opts">
+      ${pfField}
       <fieldset class="lf-model"><legend class="lf-lbl">Model</legend><div class="lf-seg">${models.map(([v, l]) =>
         `<label><input type="radio" name="model" value="${esc(v)}" ${v === want ? "checked" : ""}><span>${esc(l)}</span></label>`).join("")}</div></fieldset>
       <div class="field">${lbl("Plugins")}<button type="button" class="btn lf-pl" aria-expanded="${!!PJ.launch?.more}" aria-controls="ns-plugins"></button></div>
@@ -948,6 +954,9 @@ function lfHtml(p) {
     </div>
   </form>`;
 }
+
+const lfProfileKey = (p) => `valet-ns-profile:${p ? p.id : "adhoc"}`;
+const lfSavedProfile = (p) => { const v = lsGet(lfProfileKey(p)); return ST.profiles.some((x) => x.name === v) ? v : ""; };
 
 // The worktree picked already has a Claude session open: starting another there is allowed, but
 // most of the time the open one is what you want.
@@ -979,6 +988,7 @@ function lfWire() {
     (NS.wt === NEW_WT ? f.elements.branch : f.querySelector("input[name=wt]:checked"))?.focus();
   }));
   form.querySelectorAll("input[name=model]").forEach((r) => (r.onchange = () => { PJ.launch.model = r.value; }));
+  form.querySelectorAll("input[name=profile]").forEach((r) => (r.onchange = () => { PJ.launch.profile = r.value; }));
   const pl = form.querySelector(".lf-pl");
   pl.onclick = () => {
     PJ.launch.more = !PJ.launch.more;
@@ -1083,12 +1093,16 @@ async function nsStart() {
     if (!w?.branch) return bad("That worktree has no branch (detached HEAD): open it from a terminal");
     target = `${p.id}@${w.branch}`;
   }
+  const profile = ST?.launch_profiles ? (form.querySelector("input[name=profile]:checked")?.value || "") : "";
+  if (ST?.launch_profiles && !profile) return bad("Choose a profile", form.querySelector("input[name=profile]"));
   busy = true; go.disabled = true; note.className = "note wide";
   note.textContent = creating ? `Creating the ${NS.ctx === ADHOC ? "folder" : "worktree"}, then starting Claude…` : "Starting Claude…";
   try {
-    const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: nsPluginSpec() });
+    const r = await post("api/new", { target, model: f.model.value, prompt: f.prompt.value.trim(), plugins: nsPluginSpec(),
+                                       ...(profile ? { profile } : {}) });
     busy = false;
-    note.textContent = `Started in herdr${r.branch ? ` on ${r.branch}` : ""}${r.created ? ` (new ${NS.ctx === ADHOC ? "folder" : "worktree"})` : ""}. It shows up in Sessions, under Open now, in a few seconds.`;
+    if (profile) lsSet(lfProfileKey(NS.ctx === ADHOC ? null : p), profile);
+    note.textContent = `Started in herdr${profile ? ` as ${profileLabel(profile)}` : ""}${r.branch ? ` on ${r.branch}` : ""}${r.created ? ` (new ${NS.ctx === ADHOC ? "folder" : "worktree"})` : ""}. It shows up in Sessions, under Open now, in a few seconds.`;
     setTimeout(() => { if (PJ.sel !== ADHOC_NEW) PJ.launch = null; else PJ.launch.prompt = ""; pjLoad(); load(); }, 2500);
   } catch (err) {
     busy = false; go.disabled = false;

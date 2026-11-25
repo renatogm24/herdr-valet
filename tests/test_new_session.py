@@ -116,6 +116,24 @@ class NewSession(unittest.TestCase):
         self.assertIn(("workspace", "create", "--cwd", str(OTHER), "--label", "other", "--no-focus"), h.calls)
         self.assertIn(("tab", "rename", "wNEW:t1", "main"), h.calls)
 
+    def test_profile_when_launch_command_takes_it(self):
+        valet.CONF.update(launch_command="my-launch {profile} {path} {model}", profiles="gd:GD,1:GD1")
+        self.assertTrue(valet.launch_profiles())
+        with self.assertRaisesRegex(ValueError, "pick a profile"):
+            valet.new_session("proj@feat/x", "opus")
+        with self.assertRaisesRegex(ValueError, "unknown profile"):
+            valet.new_session("proj@feat/x", "opus", profile="x; rm")
+        h = valet.herdr = FakeHerdr({"w2": [str(REPO)]})
+        valet.new_session("proj@feat/x", "opus", profile="1")
+        run = next(c for c in h.calls if c[:2] == ("pane", "run"))
+        self.assertEqual(run[3], f"my-launch 1 {WT} opus")
+
+    def test_no_profile_without_it_in_launch_command(self):
+        valet.CONF["profiles"] = "gd:GD,1:GD1"
+        self.assertFalse(valet.launch_profiles())
+        with self.assertRaisesRegex(ValueError, "takes no"):
+            valet.new_session("proj@feat/x", "opus", profile="gd")
+
     def test_launcher_error_is_its_stderr_without_colors(self):
         valet.herdr = FakeHerdr({})
         with self.assertRaises(ValueError) as e:
